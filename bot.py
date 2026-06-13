@@ -175,25 +175,25 @@ def register_handlers(cl):
     # ─── پیام‌های ارسالی (دستورات) ──────────────────────────────────────────
     @cl.on(events.NewMessage(outgoing=True))
     async def on_outgoing(event):
+        text = event.raw_text.strip()
+        # دستورات روشن/خاموش همیشه کار می‌کنند
+        if text == "سلف روشن":
+            db.set_setting("self_bot_active", "1")
+            await safe_edit(event, "✅ سلف‌بات روشن شد.")
+            return
+        if text == "سلف خاموش":
+            db.set_setting("self_bot_active", "0")
+            await safe_edit(event, "❌ سلف‌بات خاموش شد.")
+            return
         if db.get_setting("self_bot_active") != "1":
             return
-        text = event.raw_text.strip()
         await handle_command(event, text)
 
     async def handle_command(event, text):
         msg = event.message
 
-        # ─── دستورات اصلی ─────────────────────────────────────────────────
-        if text == "سلف روشن":
-            db.set_setting("self_bot_active", "1")
-            await safe_edit(event, "✅ سلف‌بات روشن شد.")
-
-        elif text == "سلف خاموش":
-            db.set_setting("self_bot_active", "0")
-            await safe_edit(event, "❌ سلف‌بات خاموش شد.")
-
         # ─── دشمن ────────────────────────────────────────────────────────
-        elif text.startswith("تنظیم دشمن"):
+        if text.startswith("تنظیم دشمن"):
             parts = text.split()
             target = await _resolve_target(event, parts)
             if target:
