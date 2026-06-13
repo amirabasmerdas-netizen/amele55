@@ -48,10 +48,12 @@ client = None
 _spam_task = None
 _clock_task = None
 _scheduler_task = None
+_handlers_registered = False
 
 
 def build_client(session_string=None):
-    global client
+    global client, _handlers_registered
+    _handlers_registered = False  # ریست تا روی کلاینت جدید دوباره ثبت شه
     if session_string:
         from telethon.sessions import StringSession
         client = TelegramClient(StringSession(session_string), config.API_ID, config.API_HASH)
@@ -97,7 +99,11 @@ async def safe_edit(event, text):
 # ─── هندلرها ───────────────────────────────────────────────────────────────────
 def register_handlers(cl):
 
-    # ─── ضد حذف ─────────────────────────────────────────────────────────────
+    #     global _handlers_registered
+    if _handlers_registered:
+        return
+    _handlers_registered = True
+─── ضد حذف ─────────────────────────────────────────────────────────────
     @cl.on(events.MessageDeleted())
     async def on_delete(event):
         if db.get_setting("anti_delete_active") != "1":
