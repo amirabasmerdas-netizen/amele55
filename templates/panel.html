@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AMEL SELF55 — پنل مدیریت</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <meta name="theme-color" content="#0d0f14">
+</head>
+<body>
+
+<!-- ─── صفحه لاگین ─── -->
+<div id="loginPage" class="login-wrapper" style="display:none">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="icon">🤖</div>
+      <h1>AMEL SELF55</h1>
+      <p>سلف‌بات فارسی تلگرام</p>
+    </div>
+
+    <div class="login-steps">
+      <!-- مرحله ۱: شماره تلفن -->
+      <div class="step active" id="step-phone">
+        <p class="step-title">📱 ورود با شماره تلگرام</p>
+        <div class="form-group">
+          <label>شماره تلفن (با کد کشور)</label>
+          <input type="tel" id="phoneInput" placeholder="+989123456789" dir="ltr">
+        </div>
+        <button class="login-btn" id="sendCodeBtn" onclick="sendCode()">ارسال کد</button>
+        <div class="error-msg" id="phoneError"></div>
+      </div>
+
+      <!-- مرحله ۲: کد تأیید -->
+      <div class="step" id="step-code">
+        <p class="step-title">🔢 کد تأیید</p>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">
+          کد ارسال شده به تلگرام را وارد کنید
+        </p>
+        <div class="form-group">
+          <label>کد تأیید</label>
+          <input type="text" id="codeInput" placeholder="12345" maxlength="6" dir="ltr">
+        </div>
+        <button class="login-btn" id="verifyCodeBtn" onclick="verifyCode()">تأیید کد</button>
+        <div class="error-msg" id="codeError"></div>
+      </div>
+
+      <!-- مرحله ۳: رمز دو مرحله‌ای -->
+      <div class="step" id="step-2fa">
+        <p class="step-title">🔐 رمز دو مرحله‌ای</p>
+        <div class="form-group">
+          <label>رمز Cloud Password</label>
+          <input type="password" id="passwordInput" placeholder="رمز تلگرام" dir="ltr">
+        </div>
+        <button class="login-btn" id="verify2faBtn" onclick="verify2fa()">ورود</button>
+        <div class="error-msg" id="tfaError"></div>
+      </div>
+
+      <!-- مرحله ۴: موفقیت -->
+      <div class="step" id="step-success">
+        <div style="text-align:center;padding:20px 0">
+          <div style="font-size:48px;margin-bottom:12px">✅</div>
+          <p style="font-size:17px;font-weight:600">ورود موفق!</p>
+          <p style="font-size:13px;color:var(--text-secondary);margin-top:6px">در حال انتقال به پنل...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── پنل اصلی ─── -->
+<div id="mainPanel" style="display:none">
+  <!-- موبایل هدر -->
+  <div class="mobile-header">
+    <button class="hamburger-btn" onclick="toggleSidebar()">☰</button>
+    <span style="font-weight:700;font-size:15px">AMEL SELF55</span>
+  </div>
+  <div class="overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+  <div class="app-wrapper">
+    <!-- سایدبار -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-logo">🤖</div>
+        <div>
+          <div class="brand-name">AMEL SELF55</div>
+          <div class="brand-version">نسخه ۱.۰.۰</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section">اصلی</div>
+        <a class="nav-item active" onclick="showPage('dashboard')">
+          <span class="nav-icon">📊</span> داشبورد
+        </a>
+
+        <div class="nav-section">مدیریت</div>
+        <a class="nav-item" onclick="showPage('features')">
+          <span class="nav-icon">⚙️</span> قابلیت‌ها
+        </a>
+        <a class="nav-item" onclick="showPage('lists')">
+          <span class="nav-icon">👥</span> لیست‌ها
+        </a>
+        <a class="nav-item" onclick="showPage('settings')">
+          <span class="nav-icon">🔧</span> تنظیمات
+        </a>
+
+        <div class="nav-section">اطلاعات</div>
+        <a class="nav-item" onclick="showPage('commands')">
+          <span class="nav-icon">📖</span> دستورات
+        </a>
+        <a class="nav-item" onclick="showPage('deleted')">
+          <span class="nav-icon">🗑️</span> پیام‌های حذف‌شده
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="logout-btn" onclick="logout()">
+          🚪 خروج از حساب
+        </button>
+      </div>
+    </aside>
+
+    <!-- محتوا -->
+    <main class="main-content">
+
+      <!-- ─── داشبورد ─── -->
+      <div id="page-dashboard" class="page active">
+        <div class="page-header">
+          <h1 class="page-title">📊 داشبورد</h1>
+          <p class="page-subtitle">وضعیت کلی سلف‌بات</p>
+        </div>
+
+        <!-- وضعیت بات -->
+        <div class="status-banner" id="statusBanner">
+          <div class="status-left">
+            <div class="status-indicator" id="statusDot"></div>
+            <div class="status-text">
+              <h3 id="statusTitle">بات خاموش است</h3>
+              <p id="statusDesc">برای فعال‌سازی دکمه روشن را بزنید</p>
+            </div>
+          </div>
+          <button class="master-toggle-btn start" id="masterBtn" onclick="toggleMaster()">
+            ▶ روشن کردن
+          </button>
+        </div>
+
+        <!-- آمار -->
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-value" id="statEnemies">0</div>
+            <div class="stat-label">🔴 دشمن</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statFriends">0</div>
+            <div class="stat-label">💚 دوست</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statActive">0</div>
+            <div class="stat-label">✅ قابلیت فعال</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statFont">0</div>
+            <div class="stat-label">🔤 فونت انتخابی</div>
+          </div>
+        </div>
+
+        <!-- وضعیت سریع قابلیت‌ها -->
+        <div class="card">
+          <div class="card-title">⚡ وضعیت سریع</div>
+          <div id="quickStatus" class="features-grid"></div>
+        </div>
+      </div>
+
+      <!-- ─── قابلیت‌ها ─── -->
+      <div id="page-features" class="page" style="display:none">
+        <div class="page-header">
+          <h1 class="page-title">⚙️ قابلیت‌ها</h1>
+          <p class="page-subtitle">روشن/خاموش کردن ویژگی‌های بات</p>
+        </div>
+
+        <div class="tabs" id="featureTabs">
+          <button class="tab active" onclick="switchTab('security')">🛡️ امنیت</button>
+          <button class="tab" onclick="switchTab('automation')">🤖 اتوماسیون</button>
+          <button class="tab" onclick="switchTab('clock')">⏰ ساعت</button>
+          <button class="tab" onclick="switchTab('other')">🎮 سایر</button>
+        </div>
+
+        <div id="tab-security" class="tab-content active">
+          <div class="features-grid" id="featuresGrid-security"></div>
+        </div>
+        <div id="tab-automation" class="tab-content">
+          <div class="features-grid" id="featuresGrid-automation"></div>
+        </div>
+        <div id="tab-clock" class="tab-content">
+          <div class="features-grid" id="featuresGrid-clock"></div>
+        </div>
+        <div id="tab-other" class="tab-content">
+          <div class="features-grid" id="featuresGrid-other"></div>
+        </div>
+      </div>
+
+      <!-- ─── لیست‌ها ─── -->
+      <div id="page-lists" class="page" style="display:none">
+        <div class="page-header">
+          <h1 class="page-title">👥 مدیریت لیست‌ها</h1>
+          <p class="page-subtitle">دوست‌ها و دشمن‌ها</p>
+        </div>
+
+        <div class="tabs">
+          <button class="tab active" onclick="switchListTab('enemies')">🔴 دشمن</button>
+          <button class="tab" onclick="switchListTab('friends')">💚 دوست</button>
+        </div>
+
+        <!-- دشمن -->
+        <div id="listTab-enemies" class="tab-content active">
+          <div class="card">
+            <div class="card-title">➕ افزودن دشمن</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <input type="number" id="enemyId" placeholder="آیدی عددی کاربر" style="flex:1;min-width:200px" dir="ltr">
+              <input type="text" id="enemyName" placeholder="نام (اختیاری)" style="flex:1;min-width:160px">
+              <button class="btn btn-primary" onclick="addEnemy()">➕ افزودن</button>
+              <button class="btn btn-danger" onclick="clearEnemies()">🗑️ پاک کردن همه</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">🔴 لیست دشمن</div>
+            <div class="table-container">
+              <table>
+                <thead><tr><th>آیدی</th><th>نام</th><th>یوزرنیم</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+                <tbody id="enemyTable"><tr><td colspan="5" style="text-align:center;color:var(--text-muted)">در حال بارگذاری...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- دوست -->
+        <div id="listTab-friends" class="tab-content">
+          <div class="card">
+            <div class="card-title">➕ افزودن دوست</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <input type="number" id="friendId" placeholder="آیدی عددی کاربر" style="flex:1;min-width:200px" dir="ltr">
+              <input type="text" id="friendName" placeholder="نام (اختیاری)" style="flex:1;min-width:160px">
+              <button class="btn btn-primary" onclick="addFriend()">➕ افزودن</button>
+              <button class="btn btn-danger" onclick="clearFriends()">🗑️ پاک کردن همه</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">💚 لیست دوست</div>
+            <div class="table-container">
+              <table>
+                <thead><tr><th>آیدی</th><th>نام</th><th>یوزرنیم</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+                <tbody id="friendTable"><tr><td colspan="5" style="text-align:center;color:var(--text-muted)">در حال بارگذاری...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── تنظیمات ─── -->
+      <div id="page-settings" class="page" style="display:none">
+        <div class="page-header">
+          <h1 class="page-title">🔧 تنظیمات</h1>
+          <p class="page-subtitle">پیکربندی رفتار بات</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🤖 پیام منشی</div>
+          <div class="form-group">
+            <label>متن پیام خودکار منشی</label>
+            <textarea id="secretaryMsg" placeholder="پیام منشی خودکار را اینجا بنویسید..."></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="saveSecretaryMsg()">💾 ذخیره</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">❤️ ری‌اکشن پیش‌فرض</div>
+          <div class="form-group">
+            <label>ایموجی ری‌اکشن خودکار</label>
+            <input type="text" id="reactionEmoji" placeholder="❤️" style="max-width:200px">
+          </div>
+          <button class="btn btn-primary" onclick="saveReaction()">💾 ذخیره</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🔤 فونت پیام‌ها</div>
+          <div class="form-group">
+            <label>شماره فونت (۰ تا ۸)</label>
+            <select id="fontSelect" style="max-width:250px">
+              <option value="0">۰ — متن عادی</option>
+              <option value="1">۱ — Bold Sans</option>
+              <option value="2">۲ — Italic Sans</option>
+              <option value="3">۳ — Monospace</option>
+              <option value="4">۴ — Fullwidth</option>
+              <option value="5">۵ — Serif Bold</option>
+              <option value="6">۶ — Script</option>
+              <option value="7">۷ — Strikethrough</option>
+              <option value="8">۸ — Underline</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="saveFont()">💾 ذخیره</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">💣 تأخیر اسپم</div>
+          <div class="form-group">
+            <label>فاصله بین پیام‌ها (ثانیه)</label>
+            <input type="number" id="spamDelay" placeholder="2" min="1" max="60" style="max-width:200px" dir="ltr">
+          </div>
+          <button class="btn btn-primary" onclick="saveSpamDelay()">💾 ذخیره</button>
+        </div>
+      </div>
+
+      <!-- ─── دستورات ─── -->
+      <div id="page-commands" class="page" style="display:none">
+        <div class="page-header">
+          <h1 class="page-title">📖 راهنمای دستورات</h1>
+          <p class="page-subtitle">همه دستوراتی که می‌توانید در تلگرام استفاده کنید</p>
+        </div>
+
+        <div class="commands-grid">
+          <div class="command-card">
+            <h4>🔹 اصلی</h4>
+            <div class="command-list">
+              <div class="cmd"><code>سلف روشن</code> — فعال‌سازی بات</div>
+              <div class="cmd"><code>سلف خاموش</code> — غیرفعال‌سازی</div>
+              <div class="cmd"><code>وضعیت</code> — نمایش همه تنظیمات</div>
+              <div class="cmd"><code>راهنما</code> — این پیام</div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>👥 لیست‌ها</h4>
+            <div class="command-list">
+              <div class="cmd"><code>تنظیم دشمن</code> — ریپلای روی پیام</div>
+              <div class="cmd"><code>حذف دشمن</code> — ریپلای یا آیدی</div>
+              <div class="cmd"><code>نمایش لیست دشمن</code></div>
+              <div class="cmd"><code>پاک کردن لیست دشمن</code></div>
+              <div class="cmd"><code>تنظیم دوست</code> — ریپلای روی پیام</div>
+              <div class="cmd"><code>حذف دوست</code> — ریپلای یا آیدی</div>
+              <div class="cmd"><code>نمایش لیست دوست</code></div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>🤖 منشی</h4>
+            <div class="command-list">
+              <div class="cmd"><code>منشی روشن</code></div>
+              <div class="cmd"><code>منشی خاموش</code></div>
+              <div class="cmd"><code>پیام منشی [متن]</code></div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>🛡️ امنیت</h4>
+            <div class="command-list">
+              <div class="cmd"><code>ضد حذف روشن/خاموش</code></div>
+              <div class="cmd"><code>ضد لینک روشن/خاموش</code></div>
+              <div class="cmd"><code>قفل پیوی روشن/خاموش</code></div>
+              <div class="cmd"><code>پاسخ دشمن روشن/خاموش</code></div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>🔇 سایلنت</h4>
+            <div class="command-list">
+              <div class="cmd"><code>سایلنت چت روشن</code></div>
+              <div class="cmd"><code>سایلنت چت خاموش</code></div>
+              <div class="cmd"><code>سایلنت کاربر [آیدی]</code></div>
+              <div class="cmd"><code>لغو سایلنت کاربر [آیدی]</code></div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>⚡ اتوماسیون</h4>
+            <div class="command-list">
+              <div class="cmd"><code>سین خودکار روشن/خاموش</code></div>
+              <div class="cmd"><code>ری‌اکشن روشن/خاموش</code></div>
+              <div class="cmd"><code>ری‌اکشن [ایموجی]</code></div>
+              <div class="cmd"><code>ذخیره مدیا روشن/خاموش</code></div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>🔤 فونت</h4>
+            <div class="command-list">
+              <div class="cmd"><code>فونت [0-8]</code> — انتخاب فونت</div>
+              <div class="cmd"><code>لیست فونت</code> — نمایش همه</div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>⏰ ساعت</h4>
+            <div class="command-list">
+              <div class="cmd"><code>ساعت نام روشن/خاموش</code></div>
+              <div class="cmd"><code>ساعت بیو روشن/خاموش</code></div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>💣 اسپم</h4>
+            <div class="command-list">
+              <div class="cmd"><code>اسپم [تعداد] [متن]</code></div>
+              <div class="cmd"><code>توقف اسپم</code></div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>🌐 ابزار</h4>
+            <div class="command-list">
+              <div class="cmd"><code>ترجمه [متن]</code></div>
+              <div class="cmd"><code>هوا [شهر]</code></div>
+              <div class="cmd"><code>ارز</code> / <code>قیمت دلار</code></div>
+            </div>
+          </div>
+
+          <div class="command-card">
+            <h4>💾 پیام ذخیره</h4>
+            <div class="command-list">
+              <div class="cmd"><code>ذخیره [1-10]</code> — ریپلای</div>
+              <div class="cmd"><code>ارسال ذخیره [1-10]</code></div>
+              <div class="cmd"><code>حذف بعد [ثانیه]</code></div>
+              <div class="cmd"><code>ارسال زمان‌بندی [تاریخ] [متن]</code></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── پیام‌های حذف‌شده ─── -->
+      <div id="page-deleted" class="page" style="display:none">
+        <div class="page-header">
+          <h1 class="page-title">🗑️ پیام‌های حذف‌شده</h1>
+          <p class="page-subtitle">پیام‌هایی که در گفتگوها حذف شده‌اند</p>
+        </div>
+        <div class="card">
+          <div class="card-title">📜 لیست پیام‌ها</div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>فرستنده</th>
+                  <th>متن پیام</th>
+                  <th>نوع</th>
+                  <th>زمان حذف</th>
+                </tr>
+              </thead>
+              <tbody id="deletedTable">
+                <tr><td colspan="4" style="text-align:center;color:var(--text-muted)">در حال بارگذاری...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- توست‌ها -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ─── وضعیت برنامه ─────────────────────────────────────────────────────────────
+let currentSettings = {};
+const FEATURE_DEFS = {
+  security: [
+    { key: "anti_delete_active",  label: "ضد حذف",       icon: "🛡️" },
+    { key: "anti_link_active",    label: "ضد لینک",       icon: "🔗" },
+    { key: "private_lock_active", label: "قفل پیوی",     icon: "🔒" },
+    { key: "enemy_reply_active",  label: "پاسخ دشمن",    icon: "⚔️" },
+    { key: "auto_save_media",     label: "ذخیره مدیا",   icon: "💾" },
+  ],
+  automation: [
+    { key: "secretary_active",    label: "منشی خودکار",  icon: "🤖" },
+    { key: "auto_seen_active",    label: "سین خودکار",    icon: "👁️" },
+    { key: "auto_reaction_active",label: "ری‌اکشن خودکار",icon:"❤️" },
+  ],
+  clock: [
+    { key: "clock_name_active",   label: "ساعت در نام",  icon: "⏰" },
+    { key: "clock_bio_active",    label: "ساعت در بیو",  icon: "📝" },
+  ],
+  other: [
+    { key: "self_bot_active",     label: "سلف‌بات",      icon: "🤖" },
+  ],
+};
+
+// ─── راه‌اندازی ────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  const isLogin = {{ 'true' if page == 'login' else 'false' }};
+  if (isLogin) {
+    document.getElementById("loginPage").style.display = "flex";
+  } else {
+    document.getElementById("mainPanel").style.display = "block";
+    initPanel();
+  }
+});
+
+async function initPanel() {
+  await loadSettings();
+  renderFeatures();
+  renderQuickStatus();
+  loadEnemies();
+  loadFriends();
+  loadDeletedMessages();
+  updateDashboard();
+}
+
+// ─── بارگذاری تنظیمات ─────────────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/settings");
+    currentSettings = await res.json();
+    document.getElementById("secretaryMsg").value = currentSettings.secretary_message || "";
+    document.getElementById("reactionEmoji").value = currentSettings.auto_reaction_emoji || "❤️";
+    document.getElementById("fontSelect").value = currentSettings.selected_font || "0";
+    document.getElementById("spamDelay").value = currentSettings.spam_delay || "2";
+  } catch (e) { showToast("خطا در بارگذاری تنظیمات", "error"); }
+}
+
+// ─── داشبورد ──────────────────────────────────────────────────────────────────
+function updateDashboard() {
+  const active = currentSettings.self_bot_active === "1";
+  const dot = document.getElementById("statusDot");
+  const title = document.getElementById("statusTitle");
+  const desc = document.getElementById("statusDesc");
+  const btn = document.getElementById("masterBtn");
+
+  dot.classList.toggle("online", active);
+  title.textContent = active ? "✅ بات در حال اجرا است" : "❌ بات خاموش است";
+  desc.textContent = active ? "AMEL SELF55 آنلاین است" : "برای فعال‌سازی دکمه روشن را بزنید";
+  btn.className = "master-toggle-btn " + (active ? "stop" : "start");
+  btn.textContent = active ? "⏹ خاموش کردن" : "▶ روشن کردن";
+
+  const allFeatures = Object.values(FEATURE_DEFS).flat();
+  const activeCount = allFeatures.filter(f => currentSettings[f.key] === "1").length;
+  document.getElementById("statActive").textContent = activeCount;
+  document.getElementById("statFont").textContent = currentSettings.selected_font || "0";
+}
+
+async function toggleMaster() {
+  await toggleFeature("self_bot_active");
+  updateDashboard();
+  renderQuickStatus();
+}
+
+// ─── صفحه‌ها ───────────────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll(".page").forEach(p => p.style.display = "none");
+  document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
+  document.getElementById("page-" + name).style.display = "block";
+  event.currentTarget && event.currentTarget.classList.add("active");
+  closeSidebar();
+  if (name === "lists") { loadEnemies(); loadFriends(); }
+  if (name === "deleted") loadDeletedMessages();
+}
+
+// ─── تب‌ها ─────────────────────────────────────────────────────────────────────
+function switchTab(tabName) {
+  document.querySelectorAll("#featureTabs .tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach(c => {
+    if (c.id.startsWith("tab-")) c.classList.remove("active");
+  });
+  event.currentTarget.classList.add("active");
+  document.getElementById("tab-" + tabName).classList.add("active");
+}
+
+function switchListTab(tabName) {
+  document.querySelectorAll(".tabs .tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach(c => {
+    if (c.id.startsWith("listTab-")) c.classList.remove("active");
+  });
+  event.currentTarget.classList.add("active");
+  document.getElementById("listTab-" + tabName).classList.add("active");
+}
+
+// ─── رندر قابلیت‌ها ────────────────────────────────────────────────────────────
+function renderFeatures() {
+  for (const [tabName, features] of Object.entries(FEATURE_DEFS)) {
+    const container = document.getElementById("featuresGrid-" + tabName);
+    if (!container) continue;
+    container.innerHTML = features.map(f => featureItemHTML(f)).join("");
+  }
+}
+
+function renderQuickStatus() {
+  const allFeatures = Object.values(FEATURE_DEFS).flat();
+  const container = document.getElementById("quickStatus");
+  if (!container) return;
+  container.innerHTML = allFeatures.map(f => featureItemHTML(f)).join("");
+}
+
+function featureItemHTML(f) {
+  const isOn = currentSettings[f.key] === "1";
+  return `
+    <div class="feature-item">
+      <div class="feature-info">
+        <span class="feature-icon">${f.icon}</span>
+        <span class="feature-name">${f.label}</span>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" ${isOn ? "checked" : ""} onchange="toggleFeature('${f.key}', this)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>`;
+}
+
+async function toggleFeature(key, checkbox) {
+  try {
+    const res = await fetch("/api/toggle/" + key, { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) { showToast("خطا در تغییر وضعیت", "error"); return; }
+    currentSettings[key] = data.active ? "1" : "0";
+    if (checkbox) checkbox.checked = data.active;
+    showToast(data.active ? "✅ فعال شد" : "❌ غیرفعال شد", data.active ? "success" : "info");
+    updateDashboard();
+    renderQuickStatus();
+  } catch (e) { showToast("خطا در اتصال به سرور", "error"); }
+}
+
+// ─── لیست‌ها ────────────────────────────────────────────────────────────────────
+async function loadEnemies() {
+  try {
+    const res = await fetch("/api/enemies");
+    const data = await res.json();
+    document.getElementById("statEnemies").textContent = data.length;
+    const tbody = document.getElementById("enemyTable");
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">لیست خالی است</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.map(e => `
+      <tr>
+        <td><code dir="ltr">${e.user_id}</code></td>
+        <td>${e.name || "—"}</td>
+        <td>${e.username ? "@"+e.username : "—"}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${(e.added_at||"").split(".")[0]}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteEnemy(${e.user_id})">حذف</button></td>
+      </tr>`).join("");
+  } catch (e) {}
+}
+
+async function addEnemy() {
+  const uid = document.getElementById("enemyId").value.trim();
+  const name = document.getElementById("enemyName").value.trim();
+  if (!uid) { showToast("آیدی الزامی است", "error"); return; }
+  const res = await fetch("/api/enemies", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: uid, name })
+  });
+  const data = await res.json();
+  if (data.ok) { showToast("✅ دشمن اضافه شد", "success"); loadEnemies(); document.getElementById("enemyId").value = ""; document.getElementById("enemyName").value = ""; }
+  else showToast(data.error, "error");
+}
+
+async function deleteEnemy(uid) {
+  await fetch("/api/enemies/" + uid, { method: "DELETE" });
+  showToast("🗑️ حذف شد", "info");
+  loadEnemies();
+}
+
+async function clearEnemies() {
+  if (!confirm("همه دشمن‌ها پاک شوند؟")) return;
+  await fetch("/api/enemies/clear", { method: "POST" });
+  showToast("🗑️ لیست پاک شد", "info");
+  loadEnemies();
+}
+
+async function loadFriends() {
+  try {
+    const res = await fetch("/api/friends");
+    const data = await res.json();
+    document.getElementById("statFriends").textContent = data.length;
+    const tbody = document.getElementById("friendTable");
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">لیست خالی است</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.map(f => `
+      <tr>
+        <td><code dir="ltr">${f.user_id}</code></td>
+        <td>${f.name || "—"}</td>
+        <td>${f.username ? "@"+f.username : "—"}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${(f.added_at||"").split(".")[0]}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteFriend(${f.user_id})">حذف</button></td>
+      </tr>`).join("");
+  } catch (e) {}
+}
+
+async function addFriend() {
+  const uid = document.getElementById("friendId").value.trim();
+  const name = document.getElementById("friendName").value.trim();
+  if (!uid) { showToast("آیدی الزامی است", "error"); return; }
+  const res = await fetch("/api/friends", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: uid, name })
+  });
+  const data = await res.json();
+  if (data.ok) { showToast("✅ دوست اضافه شد", "success"); loadFriends(); document.getElementById("friendId").value = ""; document.getElementById("friendName").value = ""; }
+  else showToast(data.error, "error");
+}
+
+async function deleteFriend(uid) {
+  await fetch("/api/friends/" + uid, { method: "DELETE" });
+  showToast("🗑️ حذف شد", "info");
+  loadFriends();
+}
+
+async function clearFriends() {
+  if (!confirm("همه دوست‌ها پاک شوند؟")) return;
+  await fetch("/api/friends/clear", { method: "POST" });
+  showToast("🗑️ لیست پاک شد", "info");
+  loadFriends();
+}
+
+// ─── پیام‌های حذف‌شده ──────────────────────────────────────────────────────────
+async function loadDeletedMessages() {
+  try {
+    const res = await fetch("/api/deleted_messages");
+    const data = await res.json();
+    const tbody = document.getElementById("deletedTable");
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">پیامی ثبت نشده</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.map(m => `
+      <tr>
+        <td>${m.sender_name || m.sender_id}</td>
+        <td style="max-width:300px;word-break:break-word">${m.message || "—"}</td>
+        <td>${m.media_type ? `<span class="badge badge-blue">${m.media_type}</span>` : "متن"}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${(m.deleted_at||"").split(".")[0]}</td>
+      </tr>`).join("");
+  } catch (e) {}
+}
+
+// ─── تنظیمات ──────────────────────────────────────────────────────────────────
+async function saveSettings(payload, msg) {
+  const res = await fetch("/api/settings", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (data.ok) showToast(msg || "✅ ذخیره شد", "success");
+}
+
+function saveSecretaryMsg() {
+  saveSettings({ secretary_message: document.getElementById("secretaryMsg").value }, "✅ پیام منشی ذخیره شد");
+}
+function saveReaction() {
+  saveSettings({ auto_reaction_emoji: document.getElementById("reactionEmoji").value }, "✅ ری‌اکشن ذخیره شد");
+}
+function saveFont() {
+  const v = document.getElementById("fontSelect").value;
+  currentSettings.selected_font = v;
+  document.getElementById("statFont").textContent = v;
+  saveSettings({ selected_font: v }, "✅ فونت ذخیره شد");
+}
+function saveSpamDelay() {
+  saveSettings({ spam_delay: document.getElementById("spamDelay").value }, "✅ تأخیر اسپم ذخیره شد");
+}
+
+// ─── لاگین ────────────────────────────────────────────────────────────────────
+function showStep(name) {
+  document.querySelectorAll(".step").forEach(s => s.classList.remove("active"));
+  document.getElementById("step-" + name).classList.add("active");
+}
+
+function setLoginError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.display = msg ? "block" : "none";
+}
+
+async function sendCode() {
+  const phone = document.getElementById("phoneInput").value.trim();
+  if (!phone) { setLoginError("phoneError", "شماره تلفن را وارد کنید"); return; }
+  const btn = document.getElementById("sendCodeBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> در حال ارسال...';
+  setLoginError("phoneError", "");
+  try {
+    const res = await fetch("/api/login/send_code", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone })
+    });
+    const data = await res.json();
+    if (data.ok) { showStep("code"); }
+    else setLoginError("phoneError", data.error || "خطا");
+  } catch (e) { setLoginError("phoneError", "خطا در اتصال"); }
+  btn.disabled = false;
+  btn.textContent = "ارسال کد";
+}
+
+async function verifyCode() {
+  const code = document.getElementById("codeInput").value.trim();
+  if (!code) { setLoginError("codeError", "کد را وارد کنید"); return; }
+  const btn = document.getElementById("verifyCodeBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> در حال تأیید...';
+  setLoginError("codeError", "");
+  try {
+    const res = await fetch("/api/login/verify_code", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code })
+    });
+    const data = await res.json();
+    if (data.ok) { showStep("success"); setTimeout(() => location.replace("/"), 1500); }
+    else if (data.need_2fa) { showStep("2fa"); }
+    else setLoginError("codeError", data.error || "خطا");
+  } catch (e) { setLoginError("codeError", "خطا در اتصال"); }
+  btn.disabled = false;
+  btn.textContent = "تأیید کد";
+}
+
+async function verify2fa() {
+  const pw = document.getElementById("passwordInput").value;
+  if (!pw) { setLoginError("tfaError", "رمز را وارد کنید"); return; }
+  const btn = document.getElementById("verify2faBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> در حال ورود...';
+  setLoginError("tfaError", "");
+  try {
+    const res = await fetch("/api/login/verify_2fa", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw })
+    });
+    const data = await res.json();
+    if (data.ok) { showStep("success"); setTimeout(() => location.replace("/"), 1500); }
+    else setLoginError("tfaError", data.error || "خطا");
+  } catch (e) { setLoginError("tfaError", "خطا در اتصال"); }
+  btn.disabled = false;
+  btn.textContent = "ورود";
+}
+
+async function logout() {
+  if (!confirm("از حساب خارج شوید؟")) return;
+  await fetch("/api/logout", { method: "POST" });
+  location.replace("/login");
+}
+
+// ─── موبایل منو ────────────────────────────────────────────────────────────────
+function toggleSidebar() {
+  document.getElementById("sidebar").classList.toggle("open");
+  document.getElementById("sidebarOverlay").classList.toggle("open");
+}
+function closeSidebar() {
+  document.getElementById("sidebar")?.classList.remove("open");
+  document.getElementById("sidebarOverlay")?.classList.remove("open");
+}
+
+// ─── توست ─────────────────────────────────────────────────────────────────────
+function showToast(msg, type = "info") {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.textContent = msg;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+</script>
+</body>
+</html>

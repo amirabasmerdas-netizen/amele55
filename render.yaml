@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: amel-self55
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SESSION_NAME
+        value: amel_session
+      - key: PORT
+        value: "10000"
