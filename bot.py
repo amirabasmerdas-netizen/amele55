@@ -159,7 +159,7 @@ def register_handlers(cl):
             await safe_reply(event, "⚠️ پیام شما دریافت شد اما شما در لیست دشمن هستید.")
 
         # ضد لینک
-        if db.get_setting("anti_link_active") == "1" and LINK_PATTERN.search(text):
+        if db.get_setting("anti_link_active") == "1" and LINK_PAevent.is_private and TTERN.search(text):
             try:
                 await msg.delete()
             except Exception:
