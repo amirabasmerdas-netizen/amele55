@@ -700,11 +700,7 @@ async def clock_loop(cl):
         try:
             if db.get_setting("clock_name_active") == "1":
                 t = persian_time()
-                me = await cl.get_me()
-                fn = me.first_name or ""
-                # حذف ساعت قدیمی از ابتدای نام
-                fn_clean = re.sub(r"\d{2}:\d{2}\s*", "", fn).strip()
-                await cl(UpdateProfileRequest(first_name=f"{t} {fn_clean}"[:64]))
+                await cl(UpdateProfileRequest(last_name=t[:64]))
             if db.get_setting("clock_bio_active") == "1":
                 t = persian_time()
                 await cl(UpdateProfileRequest(about=f"آخرین به‌روزرسانی: {t}"[:70]))
