@@ -104,6 +104,7 @@ def init_db():
         "auto_reaction_emoji": "❤️",
         "typing_style": "0",
         "spam_active": "0",
+        "channel_save_active": "0",
         "spam_count": "10",
         "spam_delay": "2",
         "spam_text": "",
