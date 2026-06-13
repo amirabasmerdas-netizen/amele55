@@ -127,7 +127,20 @@ def register_handlers(cl):
             except Exception:
                 pass
 
-        # سین خودکار
+        # سین خودذخیره مدیای تایمدار / یک‌بار مشاهده (فقط پیوی)
+        if event.is_private and msg.media:
+            ttl = getattr(msg.media, "ttl_seconds", None)
+            if ttl:
+                try:
+                    me = await cl.get_me()
+                    path = await cl.download_media(msg, file="saved_media/")
+                    if path:
+                        await cl.send_file(me.id, path,
+                            caption=f"📥 مدیای تایمدار ذخیره شد\n👤 از: {getattr(sender, 'first_name', sender_id)} ({sender_id})")
+                except Exception:
+                    pass
+
+        # کار
         if db.get_setting("auto_seen_active") == "1":
             try:
                 await cl.send_read_acknowledge(chat_id, msg)
@@ -332,7 +345,23 @@ def register_handlers(cl):
             db.set_setting("auto_save_media", "0")
             await safe_edit(event, "💾 ذخیره خودکار مدیا خاموش شد.")
 
-        # ─── سایلنت ──────────────────────────────────────────────────────
+        # ─── سایلنت ─یو کانال ───────────────────────────────────────────────────
+        elif text.startswith("سیو کانال "):
+            # فرمت: سیو کانال [لینک یا آیدی] [تعداد اختیاری]
+            parts = text.split()
+            channel_input = parts[2] if len(parts) >= 3 else None
+            limit = int(parts[3]) if len(parts) >= 4 and parts[3].isdigit() else 100
+            if not channel_input:
+                await safe_edit(event, "❗ فرمت: سیو کانال [لینک یا آیدی] [تعداد اختیاری]")
+            else:
+                await safe_edit(event, f"⏳ در حال پردازش کانال، تا {limit} مدیا ذخیره می‌شود...")
+                asyncio.ensure_future(_save_channel_media(cl, channel_input, limit, event))
+
+        elif text == "توقف سیو":
+            db.set_setting("channel_save_active", "0")
+            await safe_edit(event, "🛑 سیو کانال متوقف شد.")
+
+        # ─── س─────────────────────────────────────────────────────
         elif text == "سایلنت چت روشن":
             chat = await event.get_chat()
             db.add_silent_chat(chat.id)
@@ -579,7 +608,56 @@ async def _do_spam(cl, chat_id, text, count):
     db.set_setting("spam_active", "0")
 
 
-async def _translate(text):
+async def _translasave_channel_media(cl, channel_input, limit, event):
+    db.set_setting("channel_save_active", "1")
+    os.makedirs("saved_media", exist_ok=True)
+    try:
+        me = await cl.get_me()
+
+        # تبدیل لینک به آیدی
+        if channel_input.startswith("https://t.me/"):
+            channel_input = channel_input.replace("https://t.me/", "")
+        if channel_input.startswith("@"):
+            channel_input = channel_input[1:]
+
+        saved = 0
+        skipped = 0
+
+        async for msg in cl.iter_messages(channel_input, limit=limit):
+            if db.get_setting("channel_save_active") != "1":
+                break
+            if msg.media:
+                try:
+                    path = await cl.download_media(msg, file="saved_media/")
+                    if path:
+                        caption = f"📥 سیو کانال\n📌 پیام #{msg.id}"
+                        if msg.text:
+                            caption += f"\n📝 {msg.text[:100]}"
+                        await cl.send_file(me.id, path, caption=caption)
+                        saved += 1
+                        await asyncio.sleep(1.5)
+                except FloodWaitError as e:
+                    await asyncio.sleep(e.seconds + 2)
+                except Exception:
+                    skipped += 1
+            else:
+                skipped += 1
+
+        db.set_setting("channel_save_active", "0")
+        await cl.send_message(me.id,
+            f"✅ سیو کانال تموم شد\n"
+            f"💾 ذخیره شد: {saved} فایل\n"
+            f"⏭ رد شد: {skipped} پیام")
+    except Exception as e:
+        db.set_setting("channel_save_active", "0")
+        try:
+            me = await cl.get_me()
+            await cl.send_message(me.id, f"❌ خطا در سیو کانال: {str(e)}")
+        except Exception:
+            pass
+
+
+async def _te(text):
     try:
         import urllib.request
         import urllib.parse
@@ -694,7 +772,14 @@ def _help_text():
 """
 
 
-# ─── تسک پس‌زمینه: ساعت ──────────────────────────────────────────────────────
+#
+🔹 سیو مدیا:
+• سیو کانال [لینک یا @یوزرنیم] [تعداد اختیاری]
+  مثال: سیو کانال @mychannel 50
+  مثال: سیو کانال https://t.me/mychannel
+• توقف سیو — متوقف کردن سیو کانال
+• مدیای تایمدار: خودکار ذخیره می‌شود (نیاز به دستور ندارد)
+ ─── تسک پس‌زمینه: ساعت ──────────────────────────────────────────────────────
 async def clock_loop(cl):
     while True:
         try:
