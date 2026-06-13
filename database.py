@@ -1,377 +1,500 @@
-import asyncio
+import sqlite3
+import hashlib
 import os
-import threading
-from functools import wraps
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-from telethon.errors import (
-    SessionPasswordNeededError,
-    PhoneCodeInvalidError,
-    PhoneCodeExpiredError,
-    FloodWaitError,
-)
-import database as db
-import config
-from bot import bot_manager
-
-app = Flask(__name__)
-app.secret_key = config.SECRET_KEY
-
-# ─── event loop جداگانه برای Telethon ────────────────────────────────────────
-_loop = None
-_login_clients = {}   # {owner_id: TelegramClient} برای فرایند لاگین
-_phone_hashes = {}    # {owner_id: phone_code_hash}
-_phone_numbers = {}   # {owner_id: phone}
+from config import DATABASE_PATH
 
 
-def get_loop():
-    global _loop
-    if _loop is None or _loop.is_closed():
-        _loop = asyncio.new_event_loop()
-        t = threading.Thread(target=_loop.run_forever, daemon=True)
-        t.start()
-    return _loop
+def get_conn():
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
 
 
-def run_async(coro):
-    return asyncio.run_coroutine_threadsafe(coro, get_loop()).result(timeout=30)
+def _hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
-# ─── احراز هویت پنل ───────────────────────────────────────────────────────────
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("owner_id"):
-            if request.path.startswith("/api/"):
-                return jsonify({"ok": False, "error": "وارد نشده‌اید"}), 401
-            return redirect(url_for("panel_login_page"))
-        return f(*args, **kwargs)
-    return decorated
+def init_db():
+    conn = get_conn()
+    c = conn.cursor()
+
+    # ─── حساب‌های پنل ────────────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # ─── تنظیمات (per-user) ───────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            owner_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (owner_id, key)
+        )
+    """)
+
+    # ─── دشمن ─────────────────────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS enemies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            name TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, user_id)
+        )
+    """)
+
+    # ─── دوست ─────────────────────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS friends (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            name TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, user_id)
+        )
+    """)
+
+    # ─── سایلنت چت ────────────────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS silent_chats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, chat_id)
+        )
+    """)
+
+    # ─── سایلنت کاربر ─────────────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS silent_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, user_id)
+        )
+    """)
+
+    # ─── پیام‌های ذخیره‌شده ────────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS saved_messages (
+            owner_id INTEGER NOT NULL,
+            slot INTEGER NOT NULL,
+            content TEXT,
+            media_path TEXT,
+            saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (owner_id, slot)
+        )
+    """)
+
+    # ─── پیام‌های حذف‌شده ─────────────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS deleted_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            chat_id INTEGER,
+            sender_id INTEGER,
+            sender_name TEXT,
+            message TEXT,
+            media_type TEXT,
+            deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # ─── پیام‌های زمان‌بندی‌شده ───────────────────────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            send_at TIMESTAMP NOT NULL,
+            sent INTEGER DEFAULT 0
+        )
+    """)
+
+    conn.commit()
+    conn.close()
 
 
-def owner_id() -> int:
-    return int(session["owner_id"])
-
-
-# ─── keep-alive ───────────────────────────────────────────────────────────────
-@app.route("/ping")
-def ping():
-    return "pong", 200
-
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok", "bot": config.BOT_NAME}), 200
-
-
-# ─── ثبت‌نام / ورود پنل ───────────────────────────────────────────────────────
-@app.route("/")
-@login_required
-def index():
-    if db.get_setting(owner_id(), "logged_in") != "1":
-        return redirect(url_for("tg_login_page"))
-    return render_template("panel.html", page="panel",
-                           username=db.get_account(owner_id())["username"])
-
-
-@app.route("/register", methods=["GET"])
-def register_page():
-    if session.get("owner_id"):
-        return redirect(url_for("index"))
-    return render_template("panel.html", page="register")
-
-
-@app.route("/panel-login", methods=["GET"])
-def panel_login_page():
-    if session.get("owner_id"):
-        return redirect(url_for("index"))
-    has_accounts = db.account_exists()
-    return render_template("panel.html", page="panel_login",
-                           has_accounts=has_accounts)
-
-
-@app.route("/api/register", methods=["POST"])
-def api_register():
-    data = request.json or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-    if not username or not password:
-        return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
-    if len(username) < 3:
-        return jsonify({"ok": False, "error": "یوزرنیم باید حداقل ۳ کاراکتر باشد"}), 400
-    if len(password) < 6:
-        return jsonify({"ok": False, "error": "رمز باید حداقل ۶ کاراکتر باشد"}), 400
-    new_id = db.create_account(username, password)
-    if new_id is None:
-        return jsonify({"ok": False, "error": "این یوزرنیم قبلاً ثبت شده"}), 409
-    db.init_user_settings(new_id)
-    session["owner_id"] = new_id
-    return jsonify({"ok": True})
-
-
-@app.route("/api/panel-login", methods=["POST"])
-def api_panel_login():
-    data = request.json or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-    if not username or not password:
-        return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
-    uid = db.verify_account(username, password)
-    if uid is None:
-        return jsonify({"ok": False, "error": "یوزرنیم یا رمز اشتباه است"}), 401
-    session["owner_id"] = uid
-    # اگه قبلاً لاگین بوده بات رو استارت کن
-    if db.get_setting(uid, "logged_in") == "1":
-        bot_manager.start(uid, get_loop())
-    return jsonify({"ok": True})
-
-
-@app.route("/api/panel-logout", methods=["POST"])
-@login_required
-def api_panel_logout():
-    session.pop("owner_id", None)
-    return jsonify({"ok": True})
-
-
-# ─── لاگین تلگرام ────────────────────────────────────────────────────────────
-@app.route("/tg-login")
-@login_required
-def tg_login_page():
-    return render_template("panel.html", page="tg_login",
-                           username=db.get_account(owner_id())["username"])
-
-
-@app.route("/api/login/send_code", methods=["POST"])
-@login_required
-def send_code():
-    oid = owner_id()
-    data = request.json or {}
-    phone = data.get("phone", "").strip()
-    if not phone:
-        return jsonify({"ok": False, "error": "شماره تلفن الزامی است"}), 400
-    if not config.API_ID or not config.API_HASH:
-        return jsonify({"ok": False, "error": "API_ID و API_HASH تنظیم نشده‌اند"}), 400
-
-    async def _send():
-        cl = TelegramClient(StringSession(), config.API_ID, config.API_HASH)
-        await cl.connect()
-        result = await cl.send_code_request(phone)
-        _login_clients[oid] = cl
-        _phone_hashes[oid] = result.phone_code_hash
-        _phone_numbers[oid] = phone
-        return {"ok": True}
-
+# ─── مدیریت حساب ──────────────────────────────────────────────────────────────
+def create_account(username: str, password: str):
+    conn = get_conn()
+    c = conn.cursor()
     try:
-        return jsonify(run_async(_send()))
-    except FloodWaitError as e:
-        return jsonify({"ok": False, "error": f"محدودیت: {e.seconds} ثانیه صبر کنید"}), 429
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        c.execute(
+            "INSERT INTO accounts (username, password_hash) VALUES (?, ?)",
+            (username.strip(), _hash_pw(password)),
+        )
+        conn.commit()
+        return c.lastrowid
+    except sqlite3.IntegrityError:
+        return None
+    finally:
+        conn.close()
 
 
-@app.route("/api/login/verify_code", methods=["POST"])
-@login_required
-def verify_code():
-    oid = owner_id()
-    data = request.json or {}
-    code = data.get("code", "").strip()
-    if not code:
-        return jsonify({"ok": False, "error": "کد الزامی است"}), 400
-    cl = _login_clients.get(oid)
-    if not cl:
-        return jsonify({"ok": False, "error": "ابتدا کد ارسال کنید"}), 400
+def verify_account(username: str, password: str):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "SELECT id FROM accounts WHERE username = ? AND password_hash = ?",
+        (username.strip(), _hash_pw(password)),
+    )
+    row = c.fetchone()
+    conn.close()
+    return row["id"] if row else None
 
-    async def _verify():
-        phone = _phone_numbers[oid]
-        ph = _phone_hashes[oid]
-        await cl.sign_in(phone=phone, code=code, phone_code_hash=ph)
-        sess = cl.session.save()
-        await cl.disconnect()
-        _login_clients.pop(oid, None)
-        db.set_setting(oid, "session_data", sess)
-        db.set_setting(oid, "logged_in", "1")
-        return {"ok": True}
 
+def get_account(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, username, created_at FROM accounts WHERE id = ?", (owner_id,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_accounts():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, username, created_at FROM accounts ORDER BY created_at")
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def account_exists():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM accounts")
+    row = c.fetchone()
+    conn.close()
+    return row["cnt"] > 0
+
+
+# ─── تنظیمات ──────────────────────────────────────────────────────────────────
+SETTING_DEFAULTS = {
+    "self_bot_active": "0",
+    "secretary_active": "0",
+    "anti_delete_active": "0",
+    "anti_link_active": "0",
+    "auto_seen_active": "0",
+    "auto_reaction_active": "0",
+    "private_lock_active": "0",
+    "enemy_reply_active": "0",
+    "auto_save_media": "0",
+    "clock_name_active": "0",
+    "clock_bio_active": "0",
+    "selected_font": "0",
+    "secretary_message": "در حال حاضر در دسترس نیستم، بعداً پیام بگذارید.",
+    "auto_reaction_emoji": "❤️",
+    "typing_style": "0",
+    "spam_active": "0",
+    "channel_save_active": "0",
+    "spam_count": "10",
+    "spam_delay": "2",
+    "spam_text": "",
+    "session_data": "",
+    "logged_in": "0",
+}
+
+
+def init_user_settings(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    for key, value in SETTING_DEFAULTS.items():
+        c.execute(
+            "INSERT OR IGNORE INTO settings (owner_id, key, value) VALUES (?, ?, ?)",
+            (owner_id, key, value),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_setting(owner_id: int, key: str, default=None):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE owner_id = ? AND key = ?", (owner_id, key))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return row["value"]
+    return SETTING_DEFAULTS.get(key, default)
+
+
+def set_setting(owner_id: int, key: str, value):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR REPLACE INTO settings (owner_id, key, value) VALUES (?, ?, ?)",
+        (owner_id, key, str(value)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def toggle_setting(owner_id: int, key: str):
+    current = get_setting(owner_id, key, "0")
+    new_val = "0" if current == "1" else "1"
+    set_setting(owner_id, key, new_val)
+    return new_val == "1"
+
+
+def get_all_logged_in_users():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "SELECT owner_id FROM settings WHERE key = 'logged_in' AND value = '1'"
+    )
+    rows = [r["owner_id"] for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+# ─── دشمن ─────────────────────────────────────────────────────────────────────
+def add_enemy(owner_id: int, user_id: int, username=None, name=None):
+    conn = get_conn()
+    c = conn.cursor()
     try:
-        result = run_async(_verify())
-        bot_manager.start(oid, get_loop())
-        return jsonify(result)
-    except SessionPasswordNeededError:
-        return jsonify({"ok": False, "need_2fa": True}), 200
-    except (PhoneCodeInvalidError, PhoneCodeExpiredError):
-        return jsonify({"ok": False, "error": "کد اشتباه یا منقضی شده"}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        c.execute(
+            "INSERT OR REPLACE INTO enemies (owner_id, user_id, username, name) VALUES (?, ?, ?, ?)",
+            (owner_id, user_id, username, name),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
 
 
-@app.route("/api/login/verify_2fa", methods=["POST"])
-@login_required
-def verify_2fa():
-    oid = owner_id()
-    data = request.json or {}
-    password = data.get("password", "").strip()
-    if not password:
-        return jsonify({"ok": False, "error": "رمز دو مرحله‌ای الزامی است"}), 400
-    cl = _login_clients.get(oid)
-    if not cl:
-        return jsonify({"ok": False, "error": "ابتدا کد ارسال کنید"}), 400
+def remove_enemy(owner_id: int, user_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM enemies WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
 
-    async def _verify():
-        await cl.sign_in(password=password)
-        sess = cl.session.save()
-        await cl.disconnect()
-        _login_clients.pop(oid, None)
-        db.set_setting(oid, "session_data", sess)
-        db.set_setting(oid, "logged_in", "1")
-        return {"ok": True}
 
+def get_enemies(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM enemies WHERE owner_id = ? ORDER BY added_at DESC", (owner_id,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def is_enemy(owner_id: int, user_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM enemies WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
+
+
+def clear_enemies(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM enemies WHERE owner_id = ?", (owner_id,))
+    conn.commit()
+    conn.close()
+
+
+# ─── دوست ─────────────────────────────────────────────────────────────────────
+def add_friend(owner_id: int, user_id: int, username=None, name=None):
+    conn = get_conn()
+    c = conn.cursor()
     try:
-        result = run_async(_verify())
-        bot_manager.start(oid, get_loop())
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        c.execute(
+            "INSERT OR REPLACE INTO friends (owner_id, user_id, username, name) VALUES (?, ?, ?, ?)",
+            (owner_id, user_id, username, name),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
 
 
-@app.route("/api/logout", methods=["POST"])
-@login_required
-def tg_logout():
-    oid = owner_id()
-    bot_manager.stop(oid)
-    db.set_setting(oid, "logged_in", "0")
-    db.set_setting(oid, "session_data", "")
-    return jsonify({"ok": True})
+def remove_friend(owner_id: int, user_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM friends WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
 
 
-# ─── API تنظیمات ─────────────────────────────────────────────────────────────
-@app.route("/api/settings", methods=["GET"])
-@login_required
-def get_settings():
-    oid = owner_id()
-    keys = [
-        "self_bot_active", "secretary_active", "anti_delete_active",
-        "anti_link_active", "auto_seen_active", "auto_reaction_active",
-        "private_lock_active", "enemy_reply_active", "auto_save_media",
-        "clock_name_active", "clock_bio_active", "selected_font",
-        "secretary_message", "auto_reaction_emoji", "spam_delay",
-    ]
-    return jsonify({k: db.get_setting(oid, k) for k in keys})
+def get_friends(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM friends WHERE owner_id = ? ORDER BY added_at DESC", (owner_id,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
 
 
-@app.route("/api/settings", methods=["POST"])
-@login_required
-def update_settings():
-    oid = owner_id()
-    data = request.json or {}
-    allowed = ["secretary_message", "auto_reaction_emoji", "selected_font", "spam_delay", "spam_count"]
-    for k in allowed:
-        if k in data:
-            db.set_setting(oid, k, data[k])
-    return jsonify({"ok": True})
+def is_friend(owner_id: int, user_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM friends WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
 
 
-@app.route("/api/toggle/<key>", methods=["POST"])
-@login_required
-def toggle(key):
-    allowed = [
-        "self_bot_active", "secretary_active", "anti_delete_active",
-        "anti_link_active", "auto_seen_active", "auto_reaction_active",
-        "private_lock_active", "enemy_reply_active", "auto_save_media",
-        "clock_name_active", "clock_bio_active",
-    ]
-    if key not in allowed:
-        return jsonify({"ok": False, "error": "کلید مجاز نیست"}), 400
-    new_state = db.toggle_setting(owner_id(), key)
-    return jsonify({"ok": True, "active": new_state})
+def clear_friends(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM friends WHERE owner_id = ?", (owner_id,))
+    conn.commit()
+    conn.close()
 
 
-# ─── API لیست‌ها ──────────────────────────────────────────────────────────────
-@app.route("/api/enemies", methods=["GET"])
-@login_required
-def get_enemies():
-    return jsonify(db.get_enemies(owner_id()))
+# ─── سایلنت ───────────────────────────────────────────────────────────────────
+def add_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO silent_chats (owner_id, chat_id) VALUES (?, ?)", (owner_id, chat_id))
+    conn.commit()
+    conn.close()
 
 
-@app.route("/api/enemies", methods=["POST"])
-@login_required
-def add_enemy():
-    oid = owner_id()
-    data = request.json or {}
-    uid = data.get("user_id")
-    if not uid:
-        return jsonify({"ok": False, "error": "آیدی کاربر الزامی است"}), 400
-    db.add_enemy(oid, int(uid), data.get("username"), data.get("name"))
-    return jsonify({"ok": True})
+def remove_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM silent_chats WHERE owner_id = ? AND chat_id = ?", (owner_id, chat_id))
+    conn.commit()
+    conn.close()
 
 
-@app.route("/api/enemies/<int:uid>", methods=["DELETE"])
-@login_required
-def del_enemy(uid):
-    db.remove_enemy(owner_id(), uid)
-    return jsonify({"ok": True})
+def is_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM silent_chats WHERE owner_id = ? AND chat_id = ?", (owner_id, chat_id))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
 
 
-@app.route("/api/enemies/clear", methods=["POST"])
-@login_required
-def clear_enemies_api():
-    db.clear_enemies(owner_id())
-    return jsonify({"ok": True})
+def add_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO silent_users (owner_id, user_id) VALUES (?, ?)", (owner_id, user_id))
+    conn.commit()
+    conn.close()
 
 
-@app.route("/api/friends", methods=["GET"])
-@login_required
-def get_friends():
-    return jsonify(db.get_friends(owner_id()))
+def remove_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM silent_users WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    conn.commit()
+    conn.close()
 
 
-@app.route("/api/friends", methods=["POST"])
-@login_required
-def add_friend():
-    oid = owner_id()
-    data = request.json or {}
-    uid = data.get("user_id")
-    if not uid:
-        return jsonify({"ok": False, "error": "آیدی کاربر الزامی است"}), 400
-    db.add_friend(oid, int(uid), data.get("username"), data.get("name"))
-    return jsonify({"ok": True})
+def is_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM silent_users WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
 
 
-@app.route("/api/friends/<int:uid>", methods=["DELETE"])
-@login_required
-def del_friend(uid):
-    db.remove_friend(owner_id(), uid)
-    return jsonify({"ok": True})
+# ─── پیام‌های ذخیره‌شده ────────────────────────────────────────────────────────
+def save_message_slot(owner_id: int, slot: int, content, media_path=None):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR REPLACE INTO saved_messages (owner_id, slot, content, media_path) VALUES (?, ?, ?, ?)",
+        (owner_id, slot, content, media_path),
+    )
+    conn.commit()
+    conn.close()
 
 
-@app.route("/api/friends/clear", methods=["POST"])
-@login_required
-def clear_friends_api():
-    db.clear_friends(owner_id())
-    return jsonify({"ok": True})
+def get_message_slot(owner_id: int, slot: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM saved_messages WHERE owner_id = ? AND slot = ?", (owner_id, slot))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
-@app.route("/api/deleted_messages", methods=["GET"])
-@login_required
-def deleted_messages():
-    return jsonify(db.get_deleted_messages(owner_id(), 50))
+# ─── پیام‌های حذف‌شده ─────────────────────────────────────────────────────────
+def log_deleted_message(owner_id: int, chat_id, sender_id, sender_name, message, media_type=None):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO deleted_messages (owner_id, chat_id, sender_id, sender_name, message, media_type) VALUES (?, ?, ?, ?, ?, ?)",
+        (owner_id, chat_id, sender_id, sender_name, message, media_type),
+    )
+    conn.commit()
+    conn.close()
 
 
-@app.route("/api/bot_status", methods=["GET"])
-@login_required
-def bot_status():
-    oid = owner_id()
-    running = bot_manager.is_running(oid)
-    logged_in = db.get_setting(oid, "logged_in") == "1"
-    return jsonify({"running": running, "logged_in": logged_in})
+def get_deleted_messages(owner_id: int, limit=50):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "SELECT * FROM deleted_messages WHERE owner_id = ? ORDER BY deleted_at DESC LIMIT ?",
+        (owner_id, limit),
+    )
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
 
 
-# ─── اجرا ────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    db.init_db()
-    # استارت بات برای همه کاربران لاگین‌شده
-    loop = get_loop()
-    for oid in db.get_all_logged_in_users():
-        bot_manager.start(oid, loop)
-        print(f"🚀 بات کاربر {oid} استارت شد.")
-    app.run(host="0.0.0.0", port=config.PORT, debug=False)
+# ─── پیام‌های زمان‌بندی‌شده ───────────────────────────────────────────────────
+def add_scheduled_message(owner_id: int, chat_id, message, send_at):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO scheduled_messages (owner_id, chat_id, message, send_at) VALUES (?, ?, ?, ?)",
+        (owner_id, chat_id, message, send_at),
+    )
+    last_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return last_id
+
+
+def get_pending_scheduled(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute(
+        "SELECT * FROM scheduled_messages WHERE owner_id = ? AND sent = 0 AND send_at <= datetime('now') ORDER BY send_at",
+        (owner_id,),
+    )
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def mark_scheduled_sent(msg_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE scheduled_messages SET sent = 1 WHERE id = ?", (msg_id,))
+    conn.commit()
+    conn.close()
