@@ -10,60 +10,85 @@
 <body>
 
 <!-- ─── صفحه لاگین ─── -->
-<div id="loginPage" class="login-wrapper" style="display:none">
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="icon">🤖</div>
-      <h1>AMEL SELF55</h1>
-      <p>سلف‌بات فارسی تلگرام</p>
+<div id="loginPage" class="lp-body" style="display:none">
+
+  <!-- ذرات پس‌زمینه -->
+  <div class="lp-particles">
+    <span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span>
+  </div>
+
+  <div class="lp-card">
+
+    <!-- لوگو -->
+    <div class="lp-logo">
+      <div class="lp-logo-ring">
+        <div class="lp-logo-inner">🤖</div>
+      </div>
+      <h1 class="lp-title">AMEL SELF55</h1>
+      <p class="lp-sub">ربات شخصی پیشرفته تلگرام</p>
     </div>
 
-    <div class="login-steps">
-      <!-- مرحله ۱: شماره تلفن -->
-      <div class="step active" id="step-phone">
-        <p class="step-title">📱 ورود با شماره تلگرام</p>
-        <div class="form-group">
-          <label>شماره تلفن (با کد کشور)</label>
-          <input type="tel" id="phoneInput" placeholder="+989123456789" dir="ltr">
-        </div>
-        <button class="login-btn" id="sendCodeBtn" onclick="sendCode()">ارسال کد</button>
-        <div class="error-msg" id="phoneError"></div>
-      </div>
+    <!-- نوار پیشرفت مراحل -->
+    <div class="lp-steps-bar">
+      <div class="lp-step-dot active" id="dot-1">۱</div>
+      <div class="lp-step-line" id="line-1"></div>
+      <div class="lp-step-dot" id="dot-2">۲</div>
+      <div class="lp-step-line" id="line-2"></div>
+      <div class="lp-step-dot" id="dot-3">۳</div>
+    </div>
 
-      <!-- مرحله ۲: کد تأیید -->
-      <div class="step" id="step-code">
-        <p class="step-title">🔢 کد تأیید</p>
-        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">
-          کد ارسال شده به تلگرام را وارد کنید
-        </p>
-        <div class="form-group">
-          <label>کد تأیید</label>
-          <input type="text" id="codeInput" placeholder="12345" maxlength="6" dir="ltr">
-        </div>
-        <button class="login-btn" id="verifyCodeBtn" onclick="verifyCode()">تأیید کد</button>
-        <div class="error-msg" id="codeError"></div>
+    <!-- مرحله ۱: شماره -->
+    <div class="lp-step active" id="step-phone">
+      <p class="lp-step-label">📱 شماره تلگرام خود را وارد کنید</p>
+      <div class="lp-input-wrap">
+        <span class="lp-input-icon">+</span>
+        <input class="lp-input" type="tel" id="phoneInput" placeholder="989123456789" dir="ltr">
       </div>
+      <button class="lp-btn" id="sendCodeBtn" onclick="sendCode()">
+        <span class="lp-btn-text">ارسال کد تأیید</span>
+        <span class="lp-btn-arrow">←</span>
+      </button>
+      <div class="lp-error" id="phoneError"></div>
+    </div>
 
-      <!-- مرحله ۳: رمز دو مرحله‌ای -->
-      <div class="step" id="step-2fa">
-        <p class="step-title">🔐 رمز دو مرحله‌ای</p>
-        <div class="form-group">
-          <label>رمز Cloud Password</label>
-          <input type="password" id="passwordInput" placeholder="رمز تلگرام" dir="ltr">
-        </div>
-        <button class="login-btn" id="verify2faBtn" onclick="verify2fa()">ورود</button>
-        <div class="error-msg" id="tfaError"></div>
+    <!-- مرحله ۲: کد -->
+    <div class="lp-step" id="step-code">
+      <p class="lp-step-label">🔢 کد ارسال‌شده به تلگرام را وارد کنید</p>
+      <div class="lp-otp-wrap">
+        <input class="lp-input lp-otp" type="text" id="codeInput" placeholder="· · · · ·" maxlength="6" dir="ltr">
       </div>
+      <button class="lp-btn" id="verifyCodeBtn" onclick="verifyCode()">
+        <span class="lp-btn-text">تأیید و ورود</span>
+        <span class="lp-btn-arrow">←</span>
+      </button>
+      <div class="lp-error" id="codeError"></div>
+    </div>
 
-      <!-- مرحله ۴: موفقیت -->
-      <div class="step" id="step-success">
-        <div style="text-align:center;padding:20px 0">
-          <div style="font-size:48px;margin-bottom:12px">✅</div>
-          <p style="font-size:17px;font-weight:600">ورود موفق!</p>
-          <p style="font-size:13px;color:var(--text-secondary);margin-top:6px">در حال انتقال به پنل...</p>
-        </div>
+    <!-- مرحله ۳: ۲FA -->
+    <div class="lp-step" id="step-2fa">
+      <p class="lp-step-label">🔐 رمز تأیید دو مرحله‌ای</p>
+      <div class="lp-input-wrap">
+        <span class="lp-input-icon">🔒</span>
+        <input class="lp-input" type="password" id="passwordInput" placeholder="Cloud Password" dir="ltr">
+      </div>
+      <button class="lp-btn" id="verify2faBtn" onclick="verify2fa()">
+        <span class="lp-btn-text">ورود به پنل</span>
+        <span class="lp-btn-arrow">←</span>
+      </button>
+      <div class="lp-error" id="tfaError"></div>
+    </div>
+
+    <!-- مرحله ۴: موفق -->
+    <div class="lp-step" id="step-success">
+      <div class="lp-success-anim">
+        <div class="lp-success-ring">✓</div>
+        <p class="lp-success-title">ورود موفق!</p>
+        <p class="lp-success-sub">در حال انتقال به پنل مدیریت...</p>
+        <div class="lp-loading-bar"><div class="lp-loading-fill"></div></div>
       </div>
     </div>
+
   </div>
 </div>
 
@@ -759,14 +784,25 @@ function saveSpamDelay() {
 
 // ─── لاگین ────────────────────────────────────────────────────────────────────
 function showStep(name) {
-  document.querySelectorAll(".step").forEach(s => s.classList.remove("active"));
+  document.querySelectorAll(".lp-step").forEach(s => s.classList.remove("active"));
   document.getElementById("step-" + name).classList.add("active");
+  // آپدیت دات‌ها
+  const stepMap = { phone: 1, code: 2, "2fa": 3, success: 3 };
+  const n = stepMap[name] || 1;
+  document.querySelectorAll(".lp-step-dot").forEach((d, i) => {
+    d.classList.toggle("active", i + 1 <= n);
+    d.classList.toggle("done", i + 1 < n);
+  });
+  document.querySelectorAll(".lp-step-line").forEach((l, i) => {
+    l.classList.toggle("active", i + 1 < n);
+  });
 }
 
 function setLoginError(id, msg) {
   const el = document.getElementById(id);
+  if (!el) return;
   el.textContent = msg;
-  el.style.display = msg ? "block" : "none";
+  el.style.display = msg ? "flex" : "none";
 }
 
 async function sendCode() {
@@ -774,7 +810,7 @@ async function sendCode() {
   if (!phone) { setLoginError("phoneError", "شماره تلفن را وارد کنید"); return; }
   const btn = document.getElementById("sendCodeBtn");
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> در حال ارسال...';
+  btn.innerHTML = '<span class="lp-spinner"></span>';
   setLoginError("phoneError", "");
   try {
     const res = await fetch("/api/login/send_code", {
@@ -783,18 +819,18 @@ async function sendCode() {
     });
     const data = await res.json();
     if (data.ok) { showStep("code"); }
-    else setLoginError("phoneError", data.error || "خطا");
-  } catch (e) { setLoginError("phoneError", "خطا در اتصال"); }
+    else setLoginError("phoneError", data.error || "خطا در ارسال کد");
+  } catch (e) { setLoginError("phoneError", "خطا در اتصال به سرور"); }
   btn.disabled = false;
-  btn.textContent = "ارسال کد";
+  btn.innerHTML = '<span class="lp-btn-text">ارسال کد تأیید</span><span class="lp-btn-arrow">←</span>';
 }
 
 async function verifyCode() {
   const code = document.getElementById("codeInput").value.trim();
-  if (!code) { setLoginError("codeError", "کد را وارد کنید"); return; }
+  if (!code) { setLoginError("codeError", "کد تأیید را وارد کنید"); return; }
   const btn = document.getElementById("verifyCodeBtn");
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> در حال تأیید...';
+  btn.innerHTML = '<span class="lp-spinner"></span>';
   setLoginError("codeError", "");
   try {
     const res = await fetch("/api/login/verify_code", {
@@ -802,12 +838,12 @@ async function verifyCode() {
       body: JSON.stringify({ code })
     });
     const data = await res.json();
-    if (data.ok) { showStep("success"); setTimeout(() => location.replace("/"), 1500); }
+    if (data.ok) { showStep("success"); setTimeout(() => location.replace("/"), 2000); }
     else if (data.need_2fa) { showStep("2fa"); }
-    else setLoginError("codeError", data.error || "خطا");
+    else setLoginError("codeError", data.error || "کد اشتباه است");
   } catch (e) { setLoginError("codeError", "خطا در اتصال"); }
   btn.disabled = false;
-  btn.textContent = "تأیید کد";
+  btn.innerHTML = '<span class="lp-btn-text">تأیید و ورود</span><span class="lp-btn-arrow">←</span>';
 }
 
 async function verify2fa() {
@@ -815,7 +851,7 @@ async function verify2fa() {
   if (!pw) { setLoginError("tfaError", "رمز را وارد کنید"); return; }
   const btn = document.getElementById("verify2faBtn");
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> در حال ورود...';
+  btn.innerHTML = '<span class="lp-spinner"></span>';
   setLoginError("tfaError", "");
   try {
     const res = await fetch("/api/login/verify_2fa", {
@@ -823,11 +859,11 @@ async function verify2fa() {
       body: JSON.stringify({ password: pw })
     });
     const data = await res.json();
-    if (data.ok) { showStep("success"); setTimeout(() => location.replace("/"), 1500); }
-    else setLoginError("tfaError", data.error || "خطا");
+    if (data.ok) { showStep("success"); setTimeout(() => location.replace("/"), 2000); }
+    else setLoginError("tfaError", data.error || "رمز اشتباه است");
   } catch (e) { setLoginError("tfaError", "خطا در اتصال"); }
   btn.disabled = false;
-  btn.textContent = "ورود";
+  btn.innerHTML = '<span class="lp-btn-text">ورود به پنل</span><span class="lp-btn-arrow">←</span>';
 }
 
 async function logout() {
