@@ -112,6 +112,7 @@ def verify_code():
 
     try:
         result = run_async(_verify())
+        start_bot_thread()
         return jsonify(result)
     except SessionPasswordNeededError:
         return jsonify({"ok": False, "need_2fa": True}), 200
@@ -140,6 +141,7 @@ def verify_2fa():
 
     try:
         result = run_async(_verify())
+        start_bot_thread()
         return jsonify(result)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
