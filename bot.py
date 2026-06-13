@@ -62,11 +62,11 @@ def build_client(session_string=None):
 
 # ─── ابزار ─────────────────────────────────────────────────────────────────────
 def persian_time():
-    now = datetime.datetime.now()
+    iran_tz = datetime.timezone(datetime.timedelta(hours=3, minutes=30))
+    now = datetime.datetime.now(iran_tz)
     h = str(now.hour).zfill(2)
     m = str(now.minute).zfill(2)
-    s = str(now.second).zfill(2)
-    return f"⏰ {h}:{m}:{s}"
+    return f"{h}:{m}"
 
 
 BADWORDS = ["فحش", "بد", "کثیف", "احمق", "گاو", "خر", "مرتیکه"]
@@ -703,7 +703,7 @@ async def clock_loop(cl):
                 me = await cl.get_me()
                 fn = me.first_name or ""
                 # حذف ساعت قدیمی از ابتدای نام
-                fn_clean = re.sub(r"⏰ \d{2}:\d{2}:\d{2}\s*", "", fn).strip()
+                fn_clean = re.sub(r"\d{2}:\d{2}\s*", "", fn).strip()
                 await cl(UpdateProfileRequest(first_name=f"{t} {fn_clean}"[:64]))
             if db.get_setting("clock_bio_active") == "1":
                 t = persian_time()
