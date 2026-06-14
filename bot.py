@@ -2,13 +2,14 @@ import asyncio
 import re
 import os
 import datetime
+import random
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest
-from telethon.tl.functions.contacts import BlockRequest, UnblockRequest
 from telethon.errors import FloodWaitError
 import database as db
 import config
+from texts import ENEMY_REPLIES
 
 # ─── فونت‌ها ───────────────────────────────────────────────────────────────────
 FONTS = {
@@ -25,9 +26,9 @@ FONTS = {
 _ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 LINK_PATTERN = re.compile(
-    r"(|t\.me/\S+)", re.IGNORECASE
+    r"(https?://\S+|t\.me/\S+)", re.IGNORECASE
 )
-BADWORDS = ["کص مادرت", "کص خواهرت", "مادرجنده", "حرومزاده", "خارکصه", "مادرخر", "بیناموس"]
+BADWORDS = ["کص مادرت", "کص خواهرت", "خارکصه", "جنده ناموس", "مادر جنده", "مادرخر", "حرومزاده"]
 
 
 def _convert_font(text, chars):
@@ -212,19 +213,12 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
                 pass
 
         # پاسخ به دشمن
-  # پاسخ به دشمن
         if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
             try:
-                import random
-                try:
-                    from text import ENEMY_REPLIES
-                    reply_text = random.choice(ENEMY_REPLIES)
-                except (ImportError, AttributeError):
-                    reply_text = "🚫 شما در لیست دشمنان من هستید."
-                await event.reply(reply_text)
+                await event.reply(random.choice(ENEMY_REPLIES))
             except Exception:
                 pass
-                
+
         # ضد لینک (فقط پیوی)
         if db.get_setting(owner_id, "anti_link_active") == "1" and event.is_private and LINK_PATTERN.search(text):
             try:
