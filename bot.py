@@ -212,18 +212,19 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
                 pass
 
         # پاسخ به دشمن
-if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
-    try:
-        import random
-        try:
-            from text import ENEMY_REPLIES
-            reply_text = random.choice(ENEMY_REPLIES)
-        except (ImportError, AttributeError):
-            reply_text = "🚫 شما در لیست دشمنان من هستید."
-        await event.reply(reply_text)
-    except Exception:
-        pass
-
+  # پاسخ به دشمن
+        if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
+            try:
+                import random
+                try:
+                    from text import ENEMY_REPLIES
+                    reply_text = random.choice(ENEMY_REPLIES)
+                except (ImportError, AttributeError):
+                    reply_text = "🚫 شما در لیست دشمنان من هستید."
+                await event.reply(reply_text)
+            except Exception:
+                pass
+                
         # ضد لینک (فقط پیوی)
         if db.get_setting(owner_id, "anti_link_active") == "1" and event.is_private and LINK_PATTERN.search(text):
             try:
