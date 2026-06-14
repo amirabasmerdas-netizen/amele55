@@ -214,7 +214,7 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
         # پاسخ به دشمن
         if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
             try:
-                await event.reply("⚠️ پیام شما دریافت شد اما شما در لیست دشمن هستید.")
+                await event.reply("مادرجنده کیری ناموس","با کون ننت ناگت درست کردم" )
             except Exception:
                 pass
 
