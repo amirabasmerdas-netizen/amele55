@@ -168,10 +168,14 @@ def create_account(username: str, password: str):
         )
         new_id = c.lastrowid
         conn.commit()
-        # ایجاد رکورد توکن با هدیه خوش‌آمد
-        _init_tokens(conn, new_id)
+        try:
+            _init_tokens(conn, new_id)
+        except Exception:
+            pass  # در init_user_settings دوباره تلاش می‌شود
         return new_id
     except sqlite3.IntegrityError:
+        return None
+    except Exception:
         return None
     finally:
         conn.close()
@@ -291,15 +295,21 @@ SETTING_DEFAULTS = {
 def init_user_settings(owner_id: int):
     conn = get_conn()
     c = conn.cursor()
-    for key, value in SETTING_DEFAULTS.items():
-        c.execute(
-            "INSERT OR IGNORE INTO settings (owner_id, key, value) VALUES (?, ?, ?)",
-            (owner_id, key, value),
-        )
-    conn.commit()
-    # init tokens if not already
-    _init_tokens(conn, owner_id)
-    conn.close()
+    try:
+        for key, value in SETTING_DEFAULTS.items():
+            c.execute(
+                "INSERT OR IGNORE INTO settings (owner_id, key, value) VALUES (?, ?, ?)",
+                (owner_id, key, value),
+            )
+        conn.commit()
+        try:
+            _init_tokens(conn, owner_id)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    finally:
+        conn.close()
 
 
 def get_setting(owner_id: int, key: str, default=None):
