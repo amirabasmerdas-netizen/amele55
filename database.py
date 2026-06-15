@@ -1,7 +1,6 @@
 import sqlite3
 import hashlib
 import os
-import datetime
 from config import DATABASE_PATH
 
 
@@ -26,16 +25,9 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            telegram_user_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
-    # افزودن ستون telegram_user_id اگر قبلاً نبوده (برای دیتابیس‌های قدیمی)
-    try:
-        c.execute("ALTER TABLE accounts ADD COLUMN telegram_user_id INTEGER")
-    except Exception:
-        pass
 
     # ─── تنظیمات (per-user) ───────────────────────────────────────────────────
     c.execute("""
@@ -133,26 +125,6 @@ def init_db():
         )
     """)
 
-    # ─── توکن‌ها ───────────────────────────────────────────────────────────────
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS tokens (
-            owner_id INTEGER PRIMARY KEY,
-            balance INTEGER DEFAULT 0,
-            last_daily TEXT DEFAULT NULL,
-            total_earned INTEGER DEFAULT 0
-        )
-    """)
-
-    # ─── رفرال‌ها ──────────────────────────────────────────────────────────────
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS referrals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            referrer_owner_id INTEGER NOT NULL,
-            referred_tg_id INTEGER NOT NULL UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
     conn.commit()
     conn.close()
 
@@ -166,29 +138,12 @@ def create_account(username: str, password: str):
             "INSERT INTO accounts (username, password_hash) VALUES (?, ?)",
             (username.strip(), _hash_pw(password)),
         )
-        new_id = c.lastrowid
         conn.commit()
-        try:
-            _init_tokens(conn, new_id)
-        except Exception:
-            pass  # در init_user_settings دوباره تلاش می‌شود
-        return new_id
+        return c.lastrowid
     except sqlite3.IntegrityError:
-        return None
-    except Exception:
         return None
     finally:
         conn.close()
-
-
-def _init_tokens(conn, owner_id: int):
-    from config import WELCOME_TOKENS
-    c = conn.cursor()
-    c.execute(
-        "INSERT OR IGNORE INTO tokens (owner_id, balance, total_earned) VALUES (?, ?, ?)",
-        (owner_id, WELCOME_TOKENS, WELCOME_TOKENS),
-    )
-    conn.commit()
 
 
 def verify_account(username: str, password: str):
@@ -206,25 +161,7 @@ def verify_account(username: str, password: str):
 def get_account(owner_id: int):
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE id = ?", (owner_id,))
-    row = c.fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def get_account_by_username(username: str):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE username = ?", (username.strip(),))
-    row = c.fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def get_account_by_tg_id(tg_id: int):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE telegram_user_id = ?", (tg_id,))
+    c.execute("SELECT id, username, created_at FROM accounts WHERE id = ?", (owner_id,))
     row = c.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -246,23 +183,6 @@ def account_exists():
     row = c.fetchone()
     conn.close()
     return row["cnt"] > 0
-
-
-def save_telegram_user_id(owner_id: int, tg_user_id: int):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE accounts SET telegram_user_id = ? WHERE id = ?", (tg_user_id, owner_id))
-    conn.commit()
-    conn.close()
-
-
-def get_telegram_id_by_owner(owner_id: int):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT telegram_user_id FROM accounts WHERE id = ?", (owner_id,))
-    row = c.fetchone()
-    conn.close()
-    return row["telegram_user_id"] if row else None
 
 
 # ─── تنظیمات ──────────────────────────────────────────────────────────────────
@@ -295,21 +215,13 @@ SETTING_DEFAULTS = {
 def init_user_settings(owner_id: int):
     conn = get_conn()
     c = conn.cursor()
-    try:
-        for key, value in SETTING_DEFAULTS.items():
-            c.execute(
-                "INSERT OR IGNORE INTO settings (owner_id, key, value) VALUES (?, ?, ?)",
-                (owner_id, key, value),
-            )
-        conn.commit()
-        try:
-            _init_tokens(conn, owner_id)
-        except Exception:
-            pass
-    except Exception:
-        pass
-    finally:
-        conn.close()
+    for key, value in SETTING_DEFAULTS.items():
+        c.execute(
+            "INSERT OR IGNORE INTO settings (owner_id, key, value) VALUES (?, ?, ?)",
+            (owner_id, key, value),
+        )
+    conn.commit()
+    conn.close()
 
 
 def get_setting(owner_id: int, key: str, default=None):
@@ -350,133 +262,6 @@ def get_all_logged_in_users():
     rows = [r["owner_id"] for r in c.fetchall()]
     conn.close()
     return rows
-
-
-# ─── سیستم توکن ───────────────────────────────────────────────────────────────
-def _ensure_tokens_row(conn, owner_id: int):
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO tokens (owner_id, balance, total_earned) VALUES (?, 0, 0)", (owner_id,))
-    conn.commit()
-
-
-def get_token_balance(owner_id: int) -> int:
-    conn = get_conn()
-    _ensure_tokens_row(conn, owner_id)
-    c = conn.cursor()
-    c.execute("SELECT balance FROM tokens WHERE owner_id = ?", (owner_id,))
-    row = c.fetchone()
-    conn.close()
-    return row["balance"] if row else 0
-
-
-def add_tokens(owner_id: int, amount: int):
-    conn = get_conn()
-    _ensure_tokens_row(conn, owner_id)
-    c = conn.cursor()
-    c.execute(
-        "UPDATE tokens SET balance = balance + ?, total_earned = total_earned + ? WHERE owner_id = ?",
-        (amount, amount, owner_id),
-    )
-    conn.commit()
-    conn.close()
-
-
-def deduct_tokens(owner_id: int, amount: int) -> bool:
-    conn = get_conn()
-    _ensure_tokens_row(conn, owner_id)
-    c = conn.cursor()
-    c.execute("SELECT balance FROM tokens WHERE owner_id = ?", (owner_id,))
-    row = c.fetchone()
-    if not row or row["balance"] < amount:
-        conn.close()
-        return False
-    c.execute("UPDATE tokens SET balance = balance - ? WHERE owner_id = ?", (amount, owner_id))
-    conn.commit()
-    conn.close()
-    return True
-
-
-def claim_daily_token(owner_id: int):
-    from config import DAILY_TOKEN_GIFT
-    conn = get_conn()
-    _ensure_tokens_row(conn, owner_id)
-    c = conn.cursor()
-    c.execute("SELECT last_daily FROM tokens WHERE owner_id = ?", (owner_id,))
-    row = c.fetchone()
-    today = datetime.date.today().isoformat()
-    if row and row["last_daily"] == today:
-        conn.close()
-        return False, "⏰ امروز قبلاً هدیه روزانه دریافت کردید.\nفردا دوباره بیایید."
-    c.execute(
-        "UPDATE tokens SET balance = balance + ?, total_earned = total_earned + ?, last_daily = ? WHERE owner_id = ?",
-        (DAILY_TOKEN_GIFT, DAILY_TOKEN_GIFT, today, owner_id),
-    )
-    conn.commit()
-    conn.close()
-    return True, f"🎁 {DAILY_TOKEN_GIFT} توکن روزانه دریافت کردید!"
-
-
-def process_referral(referrer_owner_id: int, referred_tg_id: int) -> bool:
-    from config import REFERRAL_TOKENS
-    conn = get_conn()
-    c = conn.cursor()
-    try:
-        # چک کن این تلگرام ایدی قبلاً رفرال نشده
-        c.execute("SELECT 1 FROM referrals WHERE referred_tg_id = ?", (referred_tg_id,))
-        if c.fetchone():
-            conn.close()
-            return False
-        # چک کن referrer_owner_id معتبر است
-        c.execute("SELECT 1 FROM accounts WHERE id = ?", (referrer_owner_id,))
-        if not c.fetchone():
-            conn.close()
-            return False
-        # ثبت رفرال
-        c.execute(
-            "INSERT INTO referrals (referrer_owner_id, referred_tg_id) VALUES (?, ?)",
-            (referrer_owner_id, referred_tg_id),
-        )
-        conn.commit()
-        # اضافه کردن توکن به رفررر
-        _ensure_tokens_row(conn, referrer_owner_id)
-        c.execute(
-            "UPDATE tokens SET balance = balance + ?, total_earned = total_earned + ? WHERE owner_id = ?",
-            (REFERRAL_TOKENS, REFERRAL_TOKENS, referrer_owner_id),
-        )
-        conn.commit()
-        conn.close()
-        return True
-    except Exception:
-        conn.close()
-        return False
-
-
-def get_referral_count(owner_id: int) -> int:
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_owner_id = ?", (owner_id,))
-    row = c.fetchone()
-    conn.close()
-    return row["cnt"] if row else 0
-
-
-def get_token_stats(owner_id: int) -> dict:
-    conn = get_conn()
-    _ensure_tokens_row(conn, owner_id)
-    c = conn.cursor()
-    c.execute("SELECT balance, last_daily, total_earned FROM tokens WHERE owner_id = ?", (owner_id,))
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        return {"balance": 0, "last_daily": None, "total_earned": 0}
-    today = datetime.date.today().isoformat()
-    can_claim = row["last_daily"] != today
-    return {
-        "balance": row["balance"],
-        "last_daily": row["last_daily"],
-        "total_earned": row["total_earned"],
-        "can_claim_daily": can_claim,
-    }
 
 
 # ─── دشمن ─────────────────────────────────────────────────────────────────────
