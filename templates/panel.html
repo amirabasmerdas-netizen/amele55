@@ -22,19 +22,18 @@
       <h1 class="auth-title">AMEL <span class="auth-title-accent">SELF55</span></h1>
       <p class="auth-sub">ایجاد حساب کاربری جدید</p>
     </div>
-    
     <div class="auth-form">
       <div class="auth-field">
         <label>یوزرنیم</label>
-        <input type="text" id="regUser" placeholder="حداقل ۳ کاراکتر" autocomplete="username">
+        <input type="text" id="regUser" placeholder="حداقل ۳ کاراکتر" autocomplete="username" onkeydown="if(event.key==='Enter') doRegister()">
       </div>
       <div class="auth-field">
         <label>رمز عبور</label>
-        <input type="password" id="regPass" placeholder="حداقل ۶ کاراکتر" autocomplete="new-password">
+        <input type="password" id="regPass" placeholder="حداقل ۶ کاراکتر" autocomplete="new-password" onkeydown="if(event.key==='Enter') doRegister()">
       </div>
       <div class="auth-field">
         <label>تکرار رمز عبور</label>
-        <input type="password" id="regPass2" placeholder="رمز را مجدداً وارد کنید" autocomplete="new-password">
+        <input type="password" id="regPass2" placeholder="رمز را مجدداً وارد کنید" autocomplete="new-password" onkeydown="if(event.key==='Enter') doRegister()">
       </div>
       <div id="regError" class="auth-error" style="display:none"></div>
       <button class="auth-btn" id="regBtn" onclick="doRegister()">ایجاد حساب ←</button>
@@ -42,117 +41,24 @@
     </div>
   </div>
 </div>
-
 <script>
 async function doRegister() {
   const user = document.getElementById("regUser").value.trim();
   const pass = document.getElementById("regPass").value;
   const pass2 = document.getElementById("regPass2").value;
-  const errDiv = document.getElementById("regError");
+  const err = document.getElementById("regError");
+  err.style.display = "none";
+  if (!user || !pass) { err.textContent = "همه فیلدها الزامی هستند"; err.style.display = "block"; return; }
+  if (pass !== pass2) { err.textContent = "رمزها یکسان نیستند"; err.style.display = "block"; return; }
   const btn = document.getElementById("regBtn");
-  
-  // مخفی کردن خطای قبلی
-  errDiv.style.display = "none";
-  errDiv.textContent = "";
-  
-  // اعتبارسنجی سمت کلاینت
-  if (!user) {
-    errDiv.textContent = "لطفاً یوزرنیم را وارد کنید";
-    errDiv.style.display = "block";
-    return;
-  }
-  
-  if (user.length < 3) {
-    errDiv.textContent = "یوزرنیم باید حداقل ۳ کاراکتر باشد";
-    errDiv.style.display = "block";
-    return;
-  }
-  
-  if (!pass) {
-    errDiv.textContent = "لطفاً رمز عبور را وارد کنید";
-    errDiv.style.display = "block";
-    return;
-  }
-  
-  if (pass.length < 6) {
-    errDiv.textContent = "رمز عبور باید حداقل ۶ کاراکتر باشد";
-    errDiv.style.display = "block";
-    return;
-  }
-  
-  if (pass !== pass2) {
-    errDiv.textContent = "رمز عبور و تکرار آن یکسان نیستند";
-    errDiv.style.display = "block";
-    return;
-  }
-  
-  // غیرفعال کردن دکمه در حین ارسال
-  btn.disabled = true;
-  btn.textContent = "در حال ثبت‌نام...";
-  
+  btn.disabled = true; btn.textContent = "...";
   try {
-    const response = await fetch("/api/register", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ 
-        username: user, 
-        password: pass 
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.ok) {
-      // ثبت‌نام موفق - هدایت به صفحه اتصال تلگرام
-      showToast("✅ ثبت‌نام با موفقیت انجام شد", "success");
-      setTimeout(() => {
-        window.location.href = "/tg-login";
-      }, 1000);
-    } else {
-      // نمایش خطای سرور
-      errDiv.textContent = data.error || "خطا در ثبت‌نام. لطفاً مجدداً تلاش کنید";
-      errDiv.style.display = "block";
-    }
-  } catch (error) {
-    console.error("Error:", error);
-    errDiv.textContent = "خطا در اتصال به سرور. لطفاً اتصال اینترنت خود را بررسی کنید";
-    errDiv.style.display = "block";
-  } finally {
-    // فعال کردن مجدد دکمه
-    btn.disabled = false;
-    btn.textContent = "ایجاد حساب ←";
-  }
-}
-
-// اضافه کردن event listener برای کلید Enter
-document.addEventListener("DOMContentLoaded", function() {
-  const inputs = ["regUser", "regPass", "regPass2"];
-  inputs.forEach(id => {
-    const input = document.getElementById(id);
-    if (input) {
-      input.addEventListener("keypress", function(e) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          doRegister();
-        }
-      });
-    }
-  });
-});
-
-function showToast(msg, type) {
-  // تابع toast ساده
-  const toast = document.createElement("div");
-  toast.className = `toast toast-${type}`;
-  toast.textContent = msg;
-  toast.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:9999;padding:12px 20px;border-radius:8px;color:white;";
-  if (type === "success") toast.style.backgroundColor = "#22c55e";
-  else if (type === "error") toast.style.backgroundColor = "#ef4444";
-  else toast.style.backgroundColor = "#3b82f6";
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 3000);
+    const res = await fetch("/api/register", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ username: user, password: pass }) });
+    const data = await res.json();
+    if (data.ok) { location.replace("/tg-login"); }
+    else { err.textContent = data.error || "خطا در ثبت‌نام"; err.style.display = "block"; }
+  } catch { err.textContent = "خطا در اتصال"; err.style.display = "block"; }
+  btn.disabled = false; btn.textContent = "ایجاد حساب ←";
 }
 </script>
 
