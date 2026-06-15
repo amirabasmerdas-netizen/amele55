@@ -841,17 +841,56 @@ code { background: var(--bg3); padding: 2px 8px; border-radius: 4px; font-family
 
 @media (max-width: 860px) {
   .mob-header { display: flex; }
+
+  /* سایدبار: بیرون از صفحه، با کشیدن باز میشه */
   .sidebar {
     transform: translateX(100%);
-    width: 240px;
+    width: 260px;
+    z-index: 100;
   }
   .sidebar.open { transform: translateX(0); }
+
+  /* محتوا: کل عرض صفحه */
   .main-area { margin-right: 0; }
-  .panel-header { padding: 16px; gap: 12px; }
-  .ph-robot { font-size: 44px; }
-  .ph-title { font-size: 20px; }
-  .section { padding: 16px; }
-  .dash-grid { grid-template-columns: 1fr; }
+
+  /* هدر بزرگ روی موبایل مخفی می‌شه — mob-header جایش رو می‌گیره */
+  .panel-header { display: none; }
+
+  /* سکشن‌ها padding کمتر */
+  .section { padding: 12px; }
+
+  /* گرید داشبورد: یک ستون */
+  .dash-grid { grid-template-columns: 1fr; gap: 10px; }
+
+  /* کارت‌های داشبورد */
+  .dash-card .dc-body { padding: 10px; }
+  .dc-btn { font-size: 13px; padding: 9px 10px; }
+  .dc-btn-full { font-size: 13px; padding: 9px 10px; }
+
+  /* توکن کارت روی موبایل */
+  .dc-token-stats { gap: 10px; }
+  .dc-token-stat { padding: 10px 16px; min-width: 90px; }
+  .dc-token-big { font-size: 30px; }
+  .dc-token-actions { gap: 8px; }
+
+  /* فرم‌ها */
+  .tg-form-row { flex-direction: column; }
+  .input-group input { font-size: 14px; }
+
+  /* لیست‌ها */
+  .list-item { padding: 10px 12px; }
+
+  /* auth pages */
+  .auth-card { padding: 24px 18px; }
+  .auth-title { font-size: 26px; }
+}
+
+/* صفحات خیلی کوچک (مثل آیفون SE) */
+@media (max-width: 420px) {
+  .dash-grid { gap: 8px; }
+  .section { padding: 10px 8px; }
+  .dc-token-stats { flex-direction: column; align-items: center; }
+  .dc-token-actions .dc-btn-full { min-width: unset; }
 }
 
 /* ─── سیستم توکن ─── */
