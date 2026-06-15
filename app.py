@@ -1,454 +1,288 @@
 import asyncio
-import os
 import threading
-from functools import wraps
+import logging
+import os
+from datetime import datetime
+
+import pytz
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from telethon import TelegramClient
-from telethon.sessions import StringSession
-from telethon.errors import (
-    SessionPasswordNeededError,
-    PhoneCodeInvalidError,
-    PhoneCodeExpiredError,
-    FloodWaitError,
-)
+from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError, PhoneCodeInvalidError
+
 import database as db
-import config
-from bot import bot_manager
+from config import SECRET_KEY, PORT, TIMEZONE, SESSION_NAME, PANEL_PASSWORD
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.secret_key = config.SECRET_KEY
+app.secret_key = SECRET_KEY
 
-# ─── event loop جداگانه برای Telethon ────────────────────────────────────────
-_loop = None
-_login_clients = {}   # {owner_id: TelegramClient} برای فرایند لاگین
-_phone_hashes = {}    # {owner_id: phone_code_hash}
-_phone_numbers = {}   # {owner_id: phone}
+tz = pytz.timezone(TIMEZONE)
 
-
-def get_loop():
-    global _loop
-    if _loop is None or _loop.is_closed():
-        _loop = asyncio.new_event_loop()
-        t = threading.Thread(target=_loop.run_forever, daemon=True)
-        t.start()
-    return _loop
+# وضعیت اتصال بات
+_bot_thread: threading.Thread = None
+_bot_loop: asyncio.AbstractEventLoop = None
+_tg_client: TelegramClient = None
+_pending_phone_code: dict = {}  # {"phone": ..., "phone_code_hash": ..., "client": ...}
 
 
-def run_async(coro):
-    return asyncio.run_coroutine_threadsafe(coro, get_loop()).result(timeout=30)
+def now_display() -> str:
+    return datetime.now(tz).strftime("%H:%M:%S - %Y/%m/%d")
 
 
-# ─── احراز هویت پنل ───────────────────────────────────────────────────────────
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("owner_id"):
-            if request.path.startswith("/api/"):
-                return jsonify({"ok": False, "error": "وارد نشده‌اید"}), 401
-            return redirect(url_for("panel_login_page"))
-        return f(*args, **kwargs)
-    return decorated
+# ── راه‌اندازی پایگاه داده ─────────────────────────────────────────────────
+db.init_db()
 
 
-def owner_id() -> int:
-    return int(session["owner_id"])
-
-
-# ─── keep-alive ───────────────────────────────────────────────────────────────
+# ── مسیر Keep-Alive برای UptimeRobot ─────────────────────────────────────
+@app.route("/keepalive")
 @app.route("/ping")
-def ping():
-    return "pong", 200
+def keepalive():
+    return jsonify({"status": "alive", "time": now_display(), "bot": "AMEL SELF55"})
 
 
-@app.route("/health")
+@app.route("/healthz")
 def health():
-    return jsonify({"status": "ok", "bot": config.BOT_NAME}), 200
+    return jsonify({"ok": True})
 
 
-# ─── ثبت‌نام / ورود پنل ───────────────────────────────────────────────────────
+# ── احراز هویت پنل ──────────────────────────────────────────────────────
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if password == PANEL_PASSWORD:
+            session["logged_in"] = True
+            return redirect(url_for("panel"))
+        return render_template("panel.html", page="login", error="رمز عبور اشتباه است.")
+    return render_template("panel.html", page="login", error=None)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+def require_login(f):
+    from functools import wraps
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return wrapper
+
+
+# ── پنل اصلی ─────────────────────────────────────────────────────────────
 @app.route("/")
-@login_required
-def index():
-    if db.get_setting(owner_id(), "logged_in") != "1":
-        return redirect(url_for("tg_login_page"))
+@require_login
+def panel():
+    settings = db.get_all_settings()
+    friends = db.get_friends()
+    enemies = db.get_enemies()
+    deleted = db.get_deleted_messages(20)
+    slots = db.all_slots()
+    connected = _tg_client is not None and _tg_client.is_connected() if _tg_client else False
     return render_template(
         "panel.html",
         page="panel",
-        username=db.get_account(owner_id())["username"],
-        owner_id=owner_id(),
+        settings=settings,
+        friends=friends,
+        enemies=enemies,
+        deleted_messages=deleted,
+        slots=slots,
+        connected=connected,
+        now=now_display(),
     )
 
 
-@app.route("/register", methods=["GET"])
-def register_page():
-    if session.get("owner_id"):
-        return redirect(url_for("index"))
-    return render_template("panel.html", page="register")
-
-
-@app.route("/panel-login", methods=["GET"])
-def panel_login_page():
-    if session.get("owner_id"):
-        return redirect(url_for("index"))
-    has_accounts = db.account_exists()
-    return render_template("panel.html", page="panel_login",
-                           has_accounts=has_accounts)
-
-
-@app.route("/api/register", methods=["POST"])
-def api_register():
-    try:
-        data = request.json or {}
-        username = data.get("username", "").strip()
-        password = data.get("password", "").strip()
-        if not username or not password:
-            return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
-        if len(username) < 3:
-            return jsonify({"ok": False, "error": "یوزرنیم باید حداقل ۳ کاراکتر باشد"}), 400
-        if len(password) < 6:
-            return jsonify({"ok": False, "error": "رمز باید حداقل ۶ کاراکتر باشد"}), 400
-        new_id = db.create_account(username, password)
-        if new_id is None:
-            # شاید قبلاً ثبت شده، ولی نیمه‌کاره — بررسی کن
-            existing = db.get_account_by_username(username)
-            if existing:
-                return jsonify({"ok": False, "error": "این یوزرنیم قبلاً ثبت شده"}), 409
-            return jsonify({"ok": False, "error": "خطا در ایجاد حساب — لطفاً مجدداً تلاش کنید"}), 500
-        db.init_user_settings(new_id)
-        session["owner_id"] = new_id
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"خطای سرور: {str(e)}"}), 500
-
-
-@app.route("/api/panel-login", methods=["POST"])
-def api_panel_login():
-    data = request.json or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-    if not username or not password:
-        return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
-    uid = db.verify_account(username, password)
-    if uid is None:
-        return jsonify({"ok": False, "error": "یوزرنیم یا رمز اشتباه است"}), 401
-    session["owner_id"] = uid
-    # اگه قبلاً لاگین بوده بات رو استارت کن (بدون کسر توکن)
-    if db.get_setting(uid, "logged_in") == "1":
-        bot_manager.start(uid, get_loop(), check_tokens=False)
+# ── API پنل: تغییر تنظیمات ──────────────────────────────────────────────
+@app.route("/api/setting", methods=["POST"])
+@require_login
+def api_setting():
+    data = request.get_json()
+    key = data.get("key")
+    value = data.get("value")
+    allowed_keys = [
+        "bot_active", "secretary_active", "anti_delete_active",
+        "pv_lock_active", "anti_link_active", "auto_seen_active",
+        "auto_react_active", "secretary_text", "auto_react_emoji", "spam_delay"
+    ]
+    if key not in allowed_keys:
+        return jsonify({"ok": False, "error": "کلید نامعتبر"}), 400
+    db.set_setting(key, str(value))
     return jsonify({"ok": True})
 
 
-@app.route("/api/panel-logout", methods=["POST"])
-@login_required
-def api_panel_logout():
-    session.pop("owner_id", None)
-    return jsonify({"ok": True})
+@app.route("/api/status")
+@require_login
+def api_status():
+    connected = _tg_client is not None and _tg_client.is_connected() if _tg_client else False
+    return jsonify({
+        "ok": True,
+        "connected": connected,
+        "settings": db.get_all_settings(),
+        "now": now_display(),
+    })
 
 
-# ─── لاگین تلگرام ────────────────────────────────────────────────────────────
-@app.route("/tg-login")
-@login_required
-def tg_login_page():
-    return render_template("panel.html", page="tg_login",
-                           username=db.get_account(owner_id())["username"])
-
-
-@app.route("/api/login/send_code", methods=["POST"])
-@login_required
-def send_code():
-    oid = owner_id()
-    data = request.json or {}
+# ── ورود تلگرام: مرحله اول (شماره) ─────────────────────────────────────
+@app.route("/api/tg/send_code", methods=["POST"])
+@require_login
+def tg_send_code():
+    global _pending_phone_code
+    data = request.get_json()
     phone = data.get("phone", "").strip()
-    if not phone:
-        return jsonify({"ok": False, "error": "شماره تلفن الزامی است"}), 400
-    if not config.API_ID or not config.API_HASH:
-        return jsonify({"ok": False, "error": "API_ID و API_HASH تنظیم نشده‌اند"}), 400
+    api_id = int(data.get("api_id", 0))
+    api_hash = data.get("api_hash", "").strip()
+
+    if not phone or not api_id or not api_hash:
+        return jsonify({"ok": False, "error": "اطلاعات ناقص است."})
 
     async def _send():
-        cl = TelegramClient(StringSession(), config.API_ID, config.API_HASH)
-        await cl.connect()
-        result = await cl.send_code_request(phone)
-        _login_clients[oid] = cl
-        _phone_hashes[oid] = result.phone_code_hash
-        _phone_numbers[oid] = phone
-        return {"ok": True}
+        client = TelegramClient(SESSION_NAME, api_id, api_hash)
+        await client.connect()
+        result = await client.send_code_request(phone)
+        return client, result.phone_code_hash
 
     try:
-        return jsonify(run_async(_send()))
-    except FloodWaitError as e:
-        return jsonify({"ok": False, "error": f"محدودیت: {e.seconds} ثانیه صبر کنید"}), 429
+        loop = asyncio.new_event_loop()
+        client, phone_code_hash = loop.run_until_complete(_send())
+        loop.close()
+        _pending_phone_code = {
+            "phone": phone,
+            "phone_code_hash": phone_code_hash,
+            "api_id": api_id,
+            "api_hash": api_hash,
+        }
+        return jsonify({"ok": True, "message": "کد تأیید ارسال شد."})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": str(e)})
 
 
-@app.route("/api/login/verify_code", methods=["POST"])
-@login_required
-def verify_code():
-    oid = owner_id()
-    data = request.json or {}
+# ── ورود تلگرام: مرحله دوم (کد) ─────────────────────────────────────────
+@app.route("/api/tg/verify_code", methods=["POST"])
+@require_login
+def tg_verify_code():
+    global _tg_client, _bot_thread, _bot_loop, _pending_phone_code
+    data = request.get_json()
     code = data.get("code", "").strip()
-    if not code:
-        return jsonify({"ok": False, "error": "کد الزامی است"}), 400
-    cl = _login_clients.get(oid)
-    if not cl:
-        return jsonify({"ok": False, "error": "ابتدا کد ارسال کنید"}), 400
-
-    async def _verify():
-        phone = _phone_numbers[oid]
-        ph = _phone_hashes[oid]
-        await cl.sign_in(phone=phone, code=code, phone_code_hash=ph)
-        me = await cl.get_me()
-        sess = cl.session.save()
-        await cl.disconnect()
-        _login_clients.pop(oid, None)
-        db.set_setting(oid, "session_data", sess)
-        db.set_setting(oid, "logged_in", "1")
-        db.save_telegram_user_id(oid, me.id)
-        return {"ok": True}
-
-    try:
-        result = run_async(_verify())
-        bot_manager.start(oid, get_loop(), check_tokens=False)
-        return jsonify(result)
-    except SessionPasswordNeededError:
-        return jsonify({"ok": False, "need_2fa": True}), 200
-    except (PhoneCodeInvalidError, PhoneCodeExpiredError):
-        return jsonify({"ok": False, "error": "کد اشتباه یا منقضی شده"}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@app.route("/api/login/verify_2fa", methods=["POST"])
-@login_required
-def verify_2fa():
-    oid = owner_id()
-    data = request.json or {}
     password = data.get("password", "").strip()
-    if not password:
-        return jsonify({"ok": False, "error": "رمز دو مرحله‌ای الزامی است"}), 400
-    cl = _login_clients.get(oid)
-    if not cl:
-        return jsonify({"ok": False, "error": "ابتدا کد ارسال کنید"}), 400
+
+    if not _pending_phone_code:
+        return jsonify({"ok": False, "error": "ابتدا شماره تلفن را وارد کنید."})
+
+    phone = _pending_phone_code["phone"]
+    phone_code_hash = _pending_phone_code["phone_code_hash"]
+    api_id = _pending_phone_code["api_id"]
+    api_hash = _pending_phone_code["api_hash"]
 
     async def _verify():
-        await cl.sign_in(password=password)
-        me = await cl.get_me()
-        sess = cl.session.save()
-        await cl.disconnect()
-        _login_clients.pop(oid, None)
-        db.set_setting(oid, "session_data", sess)
-        db.set_setting(oid, "logged_in", "1")
-        db.save_telegram_user_id(oid, me.id)
-        return {"ok": True}
+        client = TelegramClient(SESSION_NAME, api_id, api_hash)
+        await client.connect()
+        try:
+            await client.sign_in(phone, code, phone_code_hash=phone_code_hash)
+        except SessionPasswordNeededError:
+            if not password:
+                return client, "2fa_required"
+            await client.sign_in(password=password)
+        return client, "ok"
 
     try:
-        result = run_async(_verify())
-        bot_manager.start(oid, get_loop(), check_tokens=False)
-        return jsonify(result)
+        loop = asyncio.new_event_loop()
+        client, status = loop.run_until_complete(_verify())
+        loop.close()
+
+        if status == "2fa_required":
+            return jsonify({"ok": False, "error": "2fa_required", "message": "رمز دو مرحله‌ای وارد کنید."})
+
+        # راه‌اندازی بات در thread جداگانه
+        _tg_client = client
+        _pending_phone_code = {}
+        _start_bot_thread(client, api_id, api_hash)
+        return jsonify({"ok": True, "message": "✅ اتصال موفق! بات در حال اجرا است."})
+    except (PhoneCodeInvalidError, PhoneCodeExpiredError):
+        return jsonify({"ok": False, "error": "کد اشتباه یا منقضی شده است."})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": str(e)})
 
 
-@app.route("/api/logout", methods=["POST"])
-@login_required
-def tg_logout():
-    oid = owner_id()
-    bot_manager.stop(oid)
-    db.set_setting(oid, "logged_in", "0")
-    db.set_setting(oid, "session_data", "")
-    return jsonify({"ok": True})
+def _start_bot_thread(client: TelegramClient, api_id: int, api_hash: int):
+    global _bot_thread, _bot_loop
+
+    def run():
+        global _bot_loop
+        import bot as bot_module
+        _bot_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_bot_loop)
+        bot_module.client = client
+        bot_module.setup_handlers(client)
+        _bot_loop.run_until_complete(client.run_until_disconnected())
+
+    _bot_thread = threading.Thread(target=run, daemon=True)
+    _bot_thread.start()
+    logger.info("🚀 بات در thread جداگانه اجرا شد.")
 
 
-# ─── روشن / خاموش کردن سلف ───────────────────────────────────────────────────
-@app.route("/api/start", methods=["POST"])
-@login_required
-def start_bot_api():
-    oid = owner_id()
-    ok = bot_manager.start(oid, get_loop(), check_tokens=True)
-    if ok:
-        db.set_setting(oid, "self_bot_active", "1")
-        # تشخیص مالک برای پیام متفاوت
-        tg_id = db.get_telegram_id_by_owner(oid)
-        if tg_id == config.OWNER_TG_ID:
-            msg = "✅ سلف روشن شد — دسترسی رایگان مالک ♾️"
-        else:
-            hours = config.SESSION_HOURS
-            tokens = config.TOKENS_PER_SESSION
-            msg = f"✅ سلف روشن شد — {tokens} توکن کسر شد — {hours} ساعت فعال است"
-        return jsonify({"ok": True, "message": msg})
-    else:
-        balance = db.get_token_balance(oid)
-        return jsonify({
-            "ok": False,
-            "error": f"توکن کافی ندارید! موجودی: {balance} — برای روشن کردن {config.TOKENS_PER_SESSION} توکن لازم است.",
-        })
+# ── حذف مخاطب از طریق پنل ───────────────────────────────────────────────
+@app.route("/remove_contact")
+@require_login
+def remove_contact():
+    contact_type = request.args.get("type")
+    uid = request.args.get("uid")
+    if not uid or not uid.isdigit():
+        return redirect(url_for("panel"))
+    uid_int = int(uid)
+    if contact_type == "friend":
+        db.remove_friend(uid_int)
+    elif contact_type == "enemy":
+        db.remove_enemy(uid_int)
+    return redirect(url_for("panel") + "#contacts")
 
 
-@app.route("/api/stop", methods=["POST"])
-@login_required
-def stop_bot_api():
-    oid = owner_id()
-    bot_manager.stop(oid)
-    db.set_setting(oid, "self_bot_active", "0")
-    return jsonify({"ok": True})
+# ── قطع اتصال تلگرام ───────────────────────────────────────────────────
+@app.route("/api/tg/disconnect", methods=["POST"])
+@require_login
+def tg_disconnect():
+    global _tg_client
+    if _tg_client:
+        try:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(_tg_client.disconnect())
+            loop.close()
+        except Exception:
+            pass
+        _tg_client = None
+    return jsonify({"ok": True, "message": "⭕ اتصال قطع شد."})
 
 
-# ─── API تنظیمات ─────────────────────────────────────────────────────────────
-@app.route("/api/settings", methods=["GET"])
-@login_required
-def get_settings():
-    oid = owner_id()
-    keys = [
-        "self_bot_active", "secretary_active", "anti_delete_active",
-        "anti_link_active", "auto_seen_active", "auto_reaction_active",
-        "private_lock_active", "enemy_reply_active", "auto_save_media",
-        "clock_name_active", "clock_bio_active", "selected_font",
-        "secretary_message", "auto_reaction_emoji", "spam_delay",
-    ]
-    return jsonify({k: db.get_setting(oid, k) for k in keys})
+# ── اگر session از قبل موجود باشد، بات را خودکار راه‌اندازی کن ─────────
+def auto_start_if_session_exists():
+    from config import API_ID, API_HASH
+    if API_ID and API_HASH and os.path.exists(f"{SESSION_NAME}.session"):
+        logger.info("📂 سشن موجود پیدا شد. راه‌اندازی خودکار...")
+        async def _connect():
+            client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+            await client.connect()
+            if await client.is_user_authorized():
+                return client
+            return None
+        try:
+            loop = asyncio.new_event_loop()
+            client = loop.run_until_complete(_connect())
+            loop.close()
+            if client:
+                global _tg_client
+                _tg_client = client
+                _start_bot_thread(client, API_ID, API_HASH)
+                logger.info("✅ بات به صورت خودکار راه‌اندازی شد.")
+        except Exception as e:
+            logger.error(f"Auto-start error: {e}")
 
 
-@app.route("/api/settings", methods=["POST"])
-@login_required
-def update_settings():
-    oid = owner_id()
-    data = request.json or {}
-    allowed = ["secretary_message", "auto_reaction_emoji", "selected_font", "spam_delay", "spam_count"]
-    for k in allowed:
-        if k in data:
-            db.set_setting(oid, k, data[k])
-    return jsonify({"ok": True})
-
-
-@app.route("/api/toggle/<key>", methods=["POST"])
-@login_required
-def toggle(key):
-    allowed = [
-        "self_bot_active", "secretary_active", "anti_delete_active",
-        "anti_link_active", "auto_seen_active", "auto_reaction_active",
-        "private_lock_active", "enemy_reply_active", "auto_save_media",
-        "clock_name_active", "clock_bio_active",
-    ]
-    if key not in allowed:
-        return jsonify({"ok": False, "error": "کلید مجاز نیست"}), 400
-    new_state = db.toggle_setting(owner_id(), key)
-    return jsonify({"ok": True, "active": new_state})
-
-
-# ─── API توکن ─────────────────────────────────────────────────────────────────
-@app.route("/api/tokens", methods=["GET"])
-@login_required
-def get_tokens():
-    import telegram_bot as tb
-    oid = owner_id()
-    stats = db.get_token_stats(oid)
-    stats["ref_count"] = db.get_referral_count(oid)
-    stats["bot_username"] = tb.BOT_USERNAME or ""
-    stats["token_system_active"] = bool(config.BOT_TOKEN)
-    stats["tokens_per_session"] = config.TOKENS_PER_SESSION
-    stats["session_hours"] = config.SESSION_HOURS
-    stats["daily_gift"] = config.DAILY_TOKEN_GIFT
-    stats["referral_tokens"] = config.REFERRAL_TOKENS
-    return jsonify(stats)
-
-
-@app.route("/api/tokens/daily", methods=["POST"])
-@login_required
-def claim_daily():
-    oid = owner_id()
-    success, message = db.claim_daily_token(oid)
-    return jsonify({"ok": success, "message": message})
-
-
-# ─── API لیست‌ها ──────────────────────────────────────────────────────────────
-@app.route("/api/enemies", methods=["GET"])
-@login_required
-def get_enemies():
-    return jsonify(db.get_enemies(owner_id()))
-
-
-@app.route("/api/enemies", methods=["POST"])
-@login_required
-def add_enemy():
-    oid = owner_id()
-    data = request.json or {}
-    uid = data.get("user_id")
-    if not uid:
-        return jsonify({"ok": False, "error": "آیدی کاربر الزامی است"}), 400
-    db.add_enemy(oid, int(uid), data.get("username"), data.get("name"))
-    return jsonify({"ok": True})
-
-
-@app.route("/api/enemies/<int:uid>", methods=["DELETE"])
-@login_required
-def del_enemy(uid):
-    db.remove_enemy(owner_id(), uid)
-    return jsonify({"ok": True})
-
-
-@app.route("/api/enemies/clear", methods=["POST"])
-@login_required
-def clear_enemies_api():
-    db.clear_enemies(owner_id())
-    return jsonify({"ok": True})
-
-
-@app.route("/api/friends", methods=["GET"])
-@login_required
-def get_friends():
-    return jsonify(db.get_friends(owner_id()))
-
-
-@app.route("/api/friends", methods=["POST"])
-@login_required
-def add_friend():
-    oid = owner_id()
-    data = request.json or {}
-    uid = data.get("user_id")
-    if not uid:
-        return jsonify({"ok": False, "error": "آیدی کاربر الزامی است"}), 400
-    db.add_friend(oid, int(uid), data.get("username"), data.get("name"))
-    return jsonify({"ok": True})
-
-
-@app.route("/api/friends/<int:uid>", methods=["DELETE"])
-@login_required
-def del_friend(uid):
-    db.remove_friend(owner_id(), uid)
-    return jsonify({"ok": True})
-
-
-@app.route("/api/friends/clear", methods=["POST"])
-@login_required
-def clear_friends_api():
-    db.clear_friends(owner_id())
-    return jsonify({"ok": True})
-
-
-@app.route("/api/deleted_messages", methods=["GET"])
-@login_required
-def deleted_messages():
-    return jsonify(db.get_deleted_messages(owner_id(), 50))
-
-
-@app.route("/api/bot_status", methods=["GET"])
-@login_required
-def bot_status():
-    oid = owner_id()
-    running = bot_manager.is_running(oid)
-    logged_in = db.get_setting(oid, "logged_in") == "1"
-    return jsonify({"running": running, "logged_in": logged_in})
-
-
-# ─── اجرا ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    db.init_db()
-    # استارت ربات توکن
-    from telegram_bot import start_token_bot
-    start_token_bot()
-    # استارت بات برای همه کاربران لاگین‌شده
-    loop = get_loop()
-    for oid in db.get_all_logged_in_users():
-        bot_manager.start(oid, loop, check_tokens=False)
-        print(f"🚀 بات کاربر {oid} استارت شد.")
-    app.run(host="0.0.0.0", port=config.PORT, debug=False)
+    auto_start_if_session_exists()
+    logger.info(f"🌐 پنل مدیریت روی پورت {PORT} در حال اجرا...")
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
