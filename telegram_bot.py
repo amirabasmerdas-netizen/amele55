@@ -19,7 +19,7 @@ def start_token_bot():
         print("⚠️  BOT_TOKEN تنظیم نشده — ربات توکن غیرفعال است")
         return
 
-    _bot = telebot.TeleBot(config.BOT_TOKEN, parse_mode="HTML")
+    _bot = telebot.TeleBot(config.BOT_TOKEN, parse_mode="HTML", threaded=False)
 
     try:
         me = _bot.get_me()
@@ -29,6 +29,18 @@ def start_token_bot():
         print(f"❌ خطا در اتصال ربات توکن: {e}")
         _bot = None
         return
+
+    # حذف webhook قبلی و پاک کردن pending updates (جلوگیری از خطای 409)
+    import time as _time
+    for attempt in range(3):
+        try:
+            _bot.delete_webhook(drop_pending_updates=True)
+            print(f"🧹 Webhook حذف شد (تلاش {attempt+1})")
+            _time.sleep(5)  # صبر کافی برای قطع اتصال قدیمی
+            break
+        except Exception as e:
+            print(f"⚠️ delete_webhook (تلاش {attempt+1}): {e}")
+            _time.sleep(3)
 
     # ─── /start ─────────────────────────────────────────────────────────────
     @_bot.message_handler(commands=["start"])
@@ -54,14 +66,16 @@ def start_token_bot():
             except (ValueError, Exception):
                 pass
 
+        site_url = getattr(config, "SITE_URL", "")
+
         account = db.get_account_by_tg_id(tg_id)
         if not account:
             markup = types.InlineKeyboardMarkup()
-            if config.SITE_URL:
+            if site_url:
                 markup.add(
                     types.InlineKeyboardButton(
                         "🌐 ورود به پنل AMEL SELF55",
-                        url=config.SITE_URL,
+                        url=site_url,
                     )
                 )
             _bot.reply_to(
@@ -72,19 +86,18 @@ def start_token_bot():
                 "2️⃣ حساب تلگرام خود را وصل کنید\n"
                 "3️⃣ دوباره /start بزنید\n\n"
                 "📌 هر ۲ توکن = ۲ ساعت سلف‌بات روشن",
-                reply_markup=markup if config.SITE_URL else None,
+                reply_markup=markup if site_url else None,
             )
             return
 
         stats = db.get_token_stats(account["id"])
-        # دکمه‌های کیبورد + دکمه اینلاین سایت
         markup = _main_keyboard()
         site_markup = types.InlineKeyboardMarkup()
-        if config.SITE_URL:
+        if site_url:
             site_markup.add(
                 types.InlineKeyboardButton(
                     "🌐 باز کردن پنل مدیریت",
-                    url=config.SITE_URL,
+                    url=site_url,
                 )
             )
         _bot.reply_to(
@@ -95,7 +108,7 @@ def start_token_bot():
             f"⚡ هر <b>۲ توکن</b> = <b>۲ ساعت</b> سلف‌بات روشن",
             reply_markup=markup,
         )
-        if config.SITE_URL:
+        if site_url:
             _bot.send_message(
                 message.chat.id,
                 "🔗 از دکمه زیر به پنل دسترسی داشته باشید:",
@@ -248,10 +261,31 @@ def start_token_bot():
         markup = _main_keyboard()
         _bot.reply_to(message, "از دکمه‌های زیر استفاده کنید:", reply_markup=markup)
 
-    t = threading.Thread(
-        target=lambda: _bot.infinity_polling(timeout=30, long_polling_timeout=30),
-        daemon=True,
-    )
+    def _polling_loop():
+        import time as _t
+        while True:
+            try:
+                _bot.infinity_polling(
+                    timeout=30,
+                    long_polling_timeout=25,
+                    restart_on_change=False,
+                    skip_pending=True,
+                )
+            except Exception as e:
+                err_str = str(e)
+                if "409" in err_str or "Conflict" in err_str:
+                    print("⚠️ تعارض polling (409) — ۱۰ ثانیه صبر...")
+                    _t.sleep(10)
+                    try:
+                        _bot.delete_webhook(drop_pending_updates=True)
+                        _t.sleep(2)
+                    except Exception:
+                        pass
+                else:
+                    print(f"⚠️ خطای polling: {e} — ۵ ثانیه صبر...")
+                    _t.sleep(5)
+
+    t = threading.Thread(target=_polling_loop, daemon=True)
     t.start()
     print(f"✅ ربات توکن @{BOT_USERNAME} استارت شد.")
 
