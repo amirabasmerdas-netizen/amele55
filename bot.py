@@ -25,7 +25,7 @@ FONTS = {
 _ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 LINK_PATTERN = re.compile(
-    r"(|t\.me/\S+)", re.IGNORECASE
+    r"(https?://\S+|t\.me/\S+)", re.IGNORECASE
 )
 BADWORDS = ["کص مادرت", "کص خواهرت", "مادرجنده", "حرومزاده", "خارکصه", "مادرخر", "بیناموس"]
 
@@ -214,7 +214,7 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
         # پاسخ به دشمن
         if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
             try:
-                await event.reply("مادرجنده کیری ناموس","با کون ننت ناگت درست کردم" )
+                await event.reply("⚠️ پیام شما دریافت شد اما شما در لیست دشمن هستید.")
             except Exception:
                 pass
 
