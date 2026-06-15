@@ -5,13 +5,21 @@ load_dotenv()
 
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
-SESSION_NAME = os.environ.get("SESSION_NAME", "amel_session")
 SECRET_KEY = os.environ.get("SECRET_KEY", "amel_self55_secret_key_change_me")
 PORT = int(os.environ.get("PORT", 5000))
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "amel.db")
 
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "8285797031"))
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "")
+
 BOT_NAME = "AMEL SELF55"
-BOT_VERSION = "1.0.0"
+BOT_VERSION = "1.2.0"
 
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
-EXCHANGE_API_KEY = os.environ.get("EXCHANGE_API_KEY", "")
+
+TOKENS_PER_SESSION = 2
+SESSION_HOURS = 2
+DAILY_TOKEN_GIFT = 1
+REFERRAL_TOKENS = 50
+WELCOME_TOKENS = 10
