@@ -29,7 +29,7 @@ _ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 LINK_PATTERN = re.compile(
     r"(https?://\S+|t\.me/\S+)", re.IGNORECASE
 )
-BADWORDS = ["مادرتو گاییدم", "مادرجنده", "کیرم تو ناموست", "حرومزاده", "کص ناموست", "کص مامانت", "خارکصه"]
+BADWORDS = ["مادرتو گاییدم", "بیناموس", "حرومزاده", "مادرجنده", "خارکصه", "مادرخر", "خارتو گاییدم"]
 
 
 def _convert_font(text, chars):
@@ -86,22 +86,26 @@ class BotManager:
         if self.is_running(owner_id):
             self.stop(owner_id)
 
-        # بررسی توکن (اگر سیستم توکن فعال باشد و check_tokens=True)
-        if config.BOT_TOKEN and check_tokens:
+        # تشخیص مالک (رایگان، بدون توکن و بدون تایمر)
+        tg_id = db.get_telegram_id_by_owner(owner_id)
+        is_owner = (tg_id is not None and tg_id == config.OWNER_TG_ID)
+
+        # بررسی توکن (اگر سیستم توکن فعال باشد و check_tokens=True و مالک نباشد)
+        if config.BOT_TOKEN and check_tokens and not is_owner:
             balance = db.get_token_balance(owner_id)
             if balance < config.TOKENS_PER_SESSION:
                 return False
             db.deduct_tokens(owner_id, config.TOKENS_PER_SESSION)
 
-        entry = {"client": None, "task": None, "stop": False}
+        entry = {"client": None, "task": None, "stop": False, "is_owner": is_owner}
         self._bots[owner_id] = entry
         task = asyncio.run_coroutine_threadsafe(
             self._run_bot(owner_id), loop
         )
         entry["task"] = task
 
-        # خاموش شدن خودکار بعد از SESSION_HOURS ساعت
-        if config.BOT_TOKEN:
+        # خاموش شدن خودکار بعد از SESSION_HOURS ساعت (فقط برای غیر مالک)
+        if config.BOT_TOKEN and not is_owner:
             self._cancel_timer(owner_id)
             timer = threading.Timer(
                 config.SESSION_HOURS * 3600, self.stop, args=[owner_id]
