@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 import threading
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
@@ -14,6 +15,38 @@ from telethon.errors import (
 import database as db
 import config
 from bot import bot_manager
+
+# چاپ خطاها در کنسول برای دیباگ
+print("🚀 Starting AMEL SELF55 Bot...")
+print(f"Python version: {sys.version}")
+print(f"Current directory: {os.getcwd()}")
+
+# اطمینان از وجود دایرکتوری دیتابیس
+db_path = config.DATABASE_PATH
+if not os.path.exists(os.path.dirname(db_path) or '.'):
+    try:
+        os.makedirs(os.path.dirname(db_path))
+    except:
+        pass
+
+# ====== قسمت مهم: initialize database قبل از هر چیز ======
+try:
+    print("📦 Initializing database...")
+    db.init_db()
+    print("✅ Database initialized successfully")
+except Exception as e:
+    print(f"❌ Database init error: {e}")
+    sys.exit(1)
+
+# ====== مقداردهی متغیرهای محیطی در Render ======
+# این متغیرها را در داشبورد Render تنظیم کنید:
+# - API_ID (integer)
+# - API_HASH (string)
+# - BOT_TOKEN (string)
+# - SECRET_KEY (string)
+# - OWNER_TG_ID (integer)
+# - OWNER_USERNAME (string)
+# - DATABASE_PATH (default: /tmp/amel.db یا /etc/amel.db)
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
