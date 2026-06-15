@@ -162,8 +162,15 @@ class BotManager:
                 # ذخیره telegram_user_id — برای تشخیص مالک
                 db.save_telegram_user_id(owner_id, me.id)
 
-                # اگر مالک است: لغو تایمر و بازگشت توکن کسرشده
-                if me.id == config.OWNER_TG_ID:
+                # تشخیص مالک: از طریق ID یا شماره تلفن
+                me_phone = (me.phone or "").lstrip("+")
+                owner_phone = getattr(config, "OWNER_PHONE", "").lstrip("+")
+                is_now_owner = (
+                    me.id == config.OWNER_TG_ID
+                    or (bool(owner_phone) and me_phone == owner_phone)
+                )
+
+                if is_now_owner:
                     entry["is_owner"] = True
                     self._cancel_timer(owner_id)
                     # فقط یک بار توکن برگشت داده می‌شود
@@ -171,7 +178,7 @@ class BotManager:
                         db.add_tokens(owner_id, entry["tokens_deducted"])
                         entry["owner_refunded"] = True
                         print(f"👑 [{owner_id}] مالک — {entry['tokens_deducted']} توکن برگشت داده شد")
-                    print(f"👑 [{owner_id}] مالک تشخیص داده شد — تایمر لغو شد — دسترسی رایگان ♾️")
+                    print(f"👑 [{owner_id}] مالک تشخیص (phone={me_phone}) — تایمر لغو — رایگان ♾️")
 
                 clock_task = asyncio.ensure_future(_clock_loop(cl, owner_id))
                 sched_task = asyncio.ensure_future(_scheduler_loop(cl, owner_id))
