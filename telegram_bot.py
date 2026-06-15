@@ -56,6 +56,14 @@ def start_token_bot():
 
         account = db.get_account_by_tg_id(tg_id)
         if not account:
+            markup = types.InlineKeyboardMarkup()
+            if config.SITE_URL:
+                markup.add(
+                    types.InlineKeyboardButton(
+                        "🌐 ورود به پنل AMEL SELF55",
+                        url=config.SITE_URL,
+                    )
+                )
             _bot.reply_to(
                 message,
                 "👋 <b>سلام!</b>\n\n"
@@ -64,11 +72,21 @@ def start_token_bot():
                 "2️⃣ حساب تلگرام خود را وصل کنید\n"
                 "3️⃣ دوباره /start بزنید\n\n"
                 "📌 هر ۲ توکن = ۲ ساعت سلف‌بات روشن",
+                reply_markup=markup if config.SITE_URL else None,
             )
             return
 
         stats = db.get_token_stats(account["id"])
+        # دکمه‌های کیبورد + دکمه اینلاین سایت
         markup = _main_keyboard()
+        site_markup = types.InlineKeyboardMarkup()
+        if config.SITE_URL:
+            site_markup.add(
+                types.InlineKeyboardButton(
+                    "🌐 باز کردن پنل مدیریت",
+                    url=config.SITE_URL,
+                )
+            )
         _bot.reply_to(
             message,
             f"👋 سلام <b>{account['username']}</b>!\n\n"
@@ -77,6 +95,12 @@ def start_token_bot():
             f"⚡ هر <b>۲ توکن</b> = <b>۲ ساعت</b> سلف‌بات روشن",
             reply_markup=markup,
         )
+        if config.SITE_URL:
+            _bot.send_message(
+                message.chat.id,
+                "🔗 از دکمه زیر به پنل دسترسی داشته باشید:",
+                reply_markup=site_markup,
+            )
 
     # ─── موجودی ─────────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("💰 موجودی", "/balance"))
