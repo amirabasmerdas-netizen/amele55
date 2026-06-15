@@ -260,6 +260,9 @@ async function verify2fa() {
       <a class="sb-item" id="nav-media" onclick="showSection('media',this)">
         <span class="sb-icon">📥</span> سیو مدیا
       </a>
+      <a class="sb-item" id="nav-tokens" onclick="showSection('dashboard',this); setTimeout(()=>{const c=document.getElementById('tokenCard');if(c)c.scrollIntoView({behavior:'smooth'});},150);" style="display:none">
+        <span class="sb-icon">🪙</span> توکن‌ها
+      </a>
       <a class="sb-item" id="nav-settings" onclick="showSection('settings',this)">
         <span class="sb-icon">⚙️</span> تنظیمات
       </a>
@@ -279,7 +282,7 @@ async function verify2fa() {
           <div style="font-size:11px;color:#6b7280">@Amele55</div>
         </div>
       </div>
-      <div class="sb-version">نسخه 1.1.0</div>
+      <div class="sb-version">نسخه 1.2.0</div>
       <button class="sb-logout" onclick="tgLogout()">🔌 قطع تلگرام</button>
       <button class="sb-logout sb-logout-red" onclick="panelLogout()" style="margin-top:6px">🚪 خروج از حساب</button>
     </div>
@@ -302,6 +305,11 @@ async function verify2fa() {
             <div class="ph-username">{{ username }}</div>
             <div class="ph-welcome">خوش آمدید</div>
           </div>
+        </div>
+        <div class="ph-tokens" id="phTokensWrap" style="display:none">
+          <span class="ph-token-icon">🪙</span>
+          <span id="phTokenBalance" class="ph-token-num">--</span>
+          <span class="ph-token-label">توکن</span>
         </div>
         <div class="ph-status">
           <span class="ph-dot" id="phDot"></span>
@@ -478,6 +486,37 @@ async function verify2fa() {
           </div>
         </div>
 
+        <!-- توکن (full width) -->
+        <div class="dash-card dc-token-card" id="tokenCard" style="display:none">
+          <div class="dc-header dc-header-gold"><span class="dc-icon">🪙</span> مدیریت توکن</div>
+          <div class="dc-body dc-token-body">
+            <div class="dc-token-stats">
+              <div class="dc-token-stat">
+                <div class="dc-token-big" id="tokenBalance">--</div>
+                <div class="dc-token-sub">موجودی فعلی</div>
+              </div>
+              <div class="dc-token-stat">
+                <div class="dc-token-med" id="tokenTotal">--</div>
+                <div class="dc-token-sub">کل دریافتی</div>
+              </div>
+              <div class="dc-token-stat">
+                <div class="dc-token-med" id="tokenRefs">--</div>
+                <div class="dc-token-sub">تعداد رفرال</div>
+              </div>
+            </div>
+            <div class="dc-token-actions">
+              <button class="dc-btn-full dc-gold" id="dailyBtn" onclick="claimDaily()">🎁 هدیه روزانه</button>
+              <button class="dc-btn-full dc-cyan" onclick="copyReferral()">🔗 کپی لینک رفرال</button>
+              <button class="dc-btn-full dc-purple" onclick="buyTokens()">🛒 خرید توکن</button>
+            </div>
+            <div class="dc-token-info-bar">
+              ⚡ <b id="tkSession">2</b> توکن = <b id="tkHours">2</b> ساعت سلف &nbsp;|&nbsp;
+              🎁 <b id="tkDaily">1</b> توکن هدیه روزانه &nbsp;|&nbsp;
+              🔗 <b id="tkRef">50</b> توکن به ازای هر رفرال
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -646,6 +685,8 @@ async function verify2fa() {
 
 <script>
 let currentSettings = {};
+window._ownerId = {{ owner_id }};
+window._botUsername = "";
 
 const TOGGLES = {
   anti_delete_active: "ضد حذف",
@@ -666,6 +707,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadSettings();
   loadEnemies();
   loadFriends();
+  loadTokens();
 });
 
 function startClock() {
@@ -738,8 +780,12 @@ async function toggleQuick(key, wantOn) {
 async function startBot() {
   try {
     const data = await (await fetch("/api/start",{method:"POST"})).json();
-    if (data.ok) { currentSettings.self_bot_active="1"; updateHeaderStatus(); showToast("✅ سلف روشن شد","success"); }
-    else showToast(data.error||"خطا","error");
+    if (data.ok) {
+      currentSettings.self_bot_active="1";
+      updateHeaderStatus();
+      showToast(data.message || "✅ سلف روشن شد","success");
+      loadTokens();
+    } else showToast(data.error||"خطا","error");
   } catch { showToast("خطا","error"); }
 }
 
@@ -857,6 +903,72 @@ function saveSpamDelay() { saveSettings({spam_delay:document.getElementById("spa
 
 async function tgLogout() { if(!confirm("از حساب تلگرام خارج شوید؟")) return; await fetch("/api/logout",{method:"POST"}); location.replace("/tg-login"); }
 async function panelLogout() { if(!confirm("از پنل خارج شوید؟")) return; await fetch("/api/panel-logout",{method:"POST"}); location.replace("/panel-login"); }
+
+// ─── سیستم توکن ─────────────────────────────────────────────────────────────
+async function loadTokens() {
+  try {
+    const data = await (await fetch("/api/tokens")).json();
+    window._botUsername = data.bot_username || "";
+    const isActive = data.token_system_active;
+
+    // نمایش/مخفی کردن المان‌های توکن
+    const wrap = document.getElementById("phTokensWrap");
+    const card = document.getElementById("tokenCard");
+    const navTok = document.getElementById("nav-tokens");
+    if (wrap) wrap.style.display = isActive ? "flex" : "none";
+    if (card) card.style.display = isActive ? "block" : "none";
+    if (navTok) navTok.style.display = isActive ? "flex" : "none";
+
+    if (!isActive) return;
+
+    // آپدیت اعداد
+    if (document.getElementById("phTokenBalance")) document.getElementById("phTokenBalance").textContent = data.balance;
+    if (document.getElementById("tokenBalance")) document.getElementById("tokenBalance").textContent = data.balance;
+    if (document.getElementById("tokenTotal")) document.getElementById("tokenTotal").textContent = data.total_earned;
+    if (document.getElementById("tokenRefs")) document.getElementById("tokenRefs").textContent = data.ref_count;
+    if (document.getElementById("tkSession")) document.getElementById("tkSession").textContent = data.tokens_per_session;
+    if (document.getElementById("tkHours")) document.getElementById("tkHours").textContent = data.session_hours;
+    if (document.getElementById("tkDaily")) document.getElementById("tkDaily").textContent = data.daily_gift;
+    if (document.getElementById("tkRef")) document.getElementById("tkRef").textContent = data.referral_tokens;
+
+    // وضعیت دکمه هدیه روزانه
+    const dailyBtn = document.getElementById("dailyBtn");
+    if (dailyBtn) {
+      dailyBtn.disabled = !data.can_claim_daily;
+      dailyBtn.textContent = data.can_claim_daily ? "🎁 هدیه روزانه" : "⏰ فردا بیایید";
+      dailyBtn.style.opacity = data.can_claim_daily ? "1" : "0.5";
+    }
+  } catch {}
+}
+
+async function claimDaily() {
+  try {
+    const data = await (await fetch("/api/tokens/daily", {method:"POST"})).json();
+    showToast(data.message, data.ok ? "success" : "info");
+    if (data.ok) loadTokens();
+  } catch { showToast("خطا در اتصال","error"); }
+}
+
+function copyReferral() {
+  if (!window._botUsername) {
+    showToast("ربات توکن تنظیم نشده","error");
+    return;
+  }
+  const link = `https://t.me/${window._botUsername}?start=ref_${window._ownerId}`;
+  navigator.clipboard.writeText(link).then(()=>{
+    showToast("🔗 لینک رفرال کپی شد!","success");
+  }).catch(()=>{
+    prompt("لینک رفرال شما:", link);
+  });
+}
+
+function buyTokens() {
+  if (!window._botUsername) {
+    showToast("ربات توکن تنظیم نشده","error");
+    return;
+  }
+  window.open(`https://t.me/${window._botUsername}?start=buy`, "_blank");
+}
 
 function showSection(name, el, listTab) {
   document.querySelectorAll(".section").forEach(s => s.style.display="none");
