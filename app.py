@@ -97,22 +97,28 @@ def panel_login_page():
 
 @app.route("/api/register", methods=["POST"])
 def api_register():
-    data = request.json or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
-    ref_code = data.get("ref", "").strip()
-    if not username or not password:
-        return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
-    if len(username) < 3:
-        return jsonify({"ok": False, "error": "یوزرنیم باید حداقل ۳ کاراکتر باشد"}), 400
-    if len(password) < 6:
-        return jsonify({"ok": False, "error": "رمز باید حداقل ۶ کاراکتر باشد"}), 400
-    new_id = db.create_account(username, password)
-    if new_id is None:
-        return jsonify({"ok": False, "error": "این یوزرنیم قبلاً ثبت شده"}), 409
-    db.init_user_settings(new_id)
-    session["owner_id"] = new_id
-    return jsonify({"ok": True})
+    try:
+        data = request.json or {}
+        username = data.get("username", "").strip()
+        password = data.get("password", "").strip()
+        if not username or not password:
+            return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
+        if len(username) < 3:
+            return jsonify({"ok": False, "error": "یوزرنیم باید حداقل ۳ کاراکتر باشد"}), 400
+        if len(password) < 6:
+            return jsonify({"ok": False, "error": "رمز باید حداقل ۶ کاراکتر باشد"}), 400
+        new_id = db.create_account(username, password)
+        if new_id is None:
+            # شاید قبلاً ثبت شده، ولی نیمه‌کاره — بررسی کن
+            existing = db.get_account_by_username(username)
+            if existing:
+                return jsonify({"ok": False, "error": "این یوزرنیم قبلاً ثبت شده"}), 409
+            return jsonify({"ok": False, "error": "خطا در ایجاد حساب — لطفاً مجدداً تلاش کنید"}), 500
+        db.init_user_settings(new_id)
+        session["owner_id"] = new_id
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"خطای سرور: {str(e)}"}), 500
 
 
 @app.route("/api/panel-login", methods=["POST"])
