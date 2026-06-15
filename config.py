@@ -10,8 +10,11 @@ PORT = int(os.environ.get("PORT", 5000))
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "amel.db")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "8285797031"))
+OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "8296865861"))
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "")
+# اگر SITE_URL تنظیم نشده، از hostname خودکار Render تشخیص بده
+_render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
+SITE_URL = os.environ.get("SITE_URL", f"https://{_render_host}" if _render_host else "")
 
 BOT_NAME = "AMEL SELF55"
 BOT_VERSION = "1.2.0"
