@@ -2,15 +2,13 @@ import asyncio
 import re
 import os
 import datetime
-import random
-import threading
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest
+from telethon.tl.functions.contacts import BlockRequest, UnblockRequest
 from telethon.errors import FloodWaitError
 import database as db
 import config
-from texts import ENEMY_REPLIES
 
 # ─── فونت‌ها ───────────────────────────────────────────────────────────────────
 FONTS = {
@@ -27,9 +25,9 @@ FONTS = {
 _ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 LINK_PATTERN = re.compile(
-    r"(https?://\S+|t\.me/\S+)", re.IGNORECASE
+    r"(|t\.me/\S+)", re.IGNORECASE
 )
-BADWORDS = ["مادرتو گاییدم", "بیناموس", "حرومزاده", "مادرجنده", "خارکصه", "مادرخر", "خارتو گاییدم"]
+BADWORDS = ["کص مادرت", "کص خواهرت", "مادرجنده", "حرومزاده", "خارکصه", "مادرخر", "بیناموس"]
 
 
 def _convert_font(text, chars):
@@ -59,7 +57,6 @@ class BotManager:
     def __init__(self):
         # {owner_id: {"client": TelegramClient, "task": asyncio.Task, "stop": bool}}
         self._bots = {}
-        self._timers = {}  # {owner_id: threading.Timer}
 
     def is_running(self, owner_id: int) -> bool:
         entry = self._bots.get(owner_id)
@@ -69,58 +66,17 @@ class BotManager:
         entry = self._bots.get(owner_id)
         return entry["client"] if entry else None
 
-    def _cancel_timer(self, owner_id: int):
-        t = self._timers.pop(owner_id, None)
-        if t:
-            t.cancel()
-
-    def session_end_time(self, owner_id: int):
-        t = self._timers.get(owner_id)
-        if t and t.is_alive():
-            import time
-            remaining = t.interval - (time.time() - t._timer_start if hasattr(t, '_timer_start') else 0)
-            return max(0, remaining)
-        return None
-
-    def start(self, owner_id: int, loop: asyncio.AbstractEventLoop, check_tokens: bool = True) -> bool:
+    def start(self, owner_id: int, loop: asyncio.AbstractEventLoop):
         if self.is_running(owner_id):
             self.stop(owner_id)
-
-        # تشخیص مالک (رایگان، بدون توکن و بدون تایمر)
-        tg_id = db.get_telegram_id_by_owner(owner_id)
-        is_owner = (tg_id is not None and tg_id == config.OWNER_TG_ID)
-
-        # بررسی توکن (اگر سیستم توکن فعال باشد و check_tokens=True و مالک نباشد)
-        tokens_deducted = 0
-        if config.BOT_TOKEN and check_tokens and not is_owner:
-            balance = db.get_token_balance(owner_id)
-            if balance < config.TOKENS_PER_SESSION:
-                return False
-            db.deduct_tokens(owner_id, config.TOKENS_PER_SESSION)
-            tokens_deducted = config.TOKENS_PER_SESSION
-
-        entry = {"client": None, "task": None, "stop": False, "is_owner": is_owner,
-                 "tokens_deducted": tokens_deducted, "owner_refunded": False}
+        entry = {"client": None, "task": None, "stop": False}
         self._bots[owner_id] = entry
         task = asyncio.run_coroutine_threadsafe(
             self._run_bot(owner_id), loop
         )
         entry["task"] = task
 
-        # خاموش شدن خودکار بعد از SESSION_HOURS ساعت (فقط برای غیر مالک)
-        if config.BOT_TOKEN and not is_owner:
-            self._cancel_timer(owner_id)
-            timer = threading.Timer(
-                config.SESSION_HOURS * 3600, self.stop, args=[owner_id]
-            )
-            timer.daemon = True
-            timer.start()
-            self._timers[owner_id] = timer
-
-        return True
-
     def stop(self, owner_id: int):
-        self._cancel_timer(owner_id)
         entry = self._bots.get(owner_id)
         if not entry:
             return
@@ -158,27 +114,6 @@ class BotManager:
                 await cl.start()
                 me = await cl.get_me()
                 print(f"✅ [{owner_id}] بات راه‌اندازی شد — {me.first_name} (@{me.username})")
-
-                # ذخیره telegram_user_id — برای تشخیص مالک
-                db.save_telegram_user_id(owner_id, me.id)
-
-                # تشخیص مالک: از طریق ID یا شماره تلفن
-                me_phone = (me.phone or "").lstrip("+")
-                owner_phone = getattr(config, "OWNER_PHONE", "").lstrip("+")
-                is_now_owner = (
-                    me.id == config.OWNER_TG_ID
-                    or (bool(owner_phone) and me_phone == owner_phone)
-                )
-
-                if is_now_owner:
-                    entry["is_owner"] = True
-                    self._cancel_timer(owner_id)
-                    # فقط یک بار توکن برگشت داده می‌شود
-                    if not entry.get("owner_refunded") and entry.get("tokens_deducted", 0) > 0:
-                        db.add_tokens(owner_id, entry["tokens_deducted"])
-                        entry["owner_refunded"] = True
-                        print(f"👑 [{owner_id}] مالک — {entry['tokens_deducted']} توکن برگشت داده شد")
-                    print(f"👑 [{owner_id}] مالک تشخیص (phone={me_phone}) — تایمر لغو — رایگان ♾️")
 
                 clock_task = asyncio.ensure_future(_clock_loop(cl, owner_id))
                 sched_task = asyncio.ensure_future(_scheduler_loop(cl, owner_id))
@@ -279,7 +214,7 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
         # پاسخ به دشمن
         if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
             try:
-                await event.reply(random.choice(ENEMY_REPLIES))
+                await event.reply("مادرجنده کیری ناموس","با کون ننت ناگت درست کردم" )
             except Exception:
                 pass
 
