@@ -261,12 +261,15 @@ def start_bot_api():
     ok = bot_manager.start(oid, get_loop(), check_tokens=True)
     if ok:
         db.set_setting(oid, "self_bot_active", "1")
-        hours = config.SESSION_HOURS
-        tokens = config.TOKENS_PER_SESSION
-        return jsonify({
-            "ok": True,
-            "message": f"✅ سلف روشن شد — {tokens} توکن کسر شد — {hours} ساعت فعال است",
-        })
+        # تشخیص مالک برای پیام متفاوت
+        tg_id = db.get_telegram_id_by_owner(oid)
+        if tg_id == config.OWNER_TG_ID:
+            msg = "✅ سلف روشن شد — دسترسی رایگان مالک ♾️"
+        else:
+            hours = config.SESSION_HOURS
+            tokens = config.TOKENS_PER_SESSION
+            msg = f"✅ سلف روشن شد — {tokens} توکن کسر شد — {hours} ساعت فعال است"
+        return jsonify({"ok": True, "message": msg})
     else:
         balance = db.get_token_balance(oid)
         return jsonify({
