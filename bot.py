@@ -3,6 +3,7 @@ import re
 import os
 import datetime
 import random
+import threading
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest
@@ -28,7 +29,7 @@ _ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 LINK_PATTERN = re.compile(
     r"(https?://\S+|t\.me/\S+)", re.IGNORECASE
 )
-BADWORDS = ["کص مادرت", "کص خواهرت", "خارکصه", "جنده ناموس", "مادر جنده", "مادرخر", "حرومزاده"]
+BADWORDS = ["مادرتو گاییدم", "مادرجنده", "کیرم تو ناموست", "حرومزاده", "کص ناموست", "کص مامانت", "خارکصه"]
 
 
 def _convert_font(text, chars):
@@ -58,6 +59,7 @@ class BotManager:
     def __init__(self):
         # {owner_id: {"client": TelegramClient, "task": asyncio.Task, "stop": bool}}
         self._bots = {}
+        self._timers = {}  # {owner_id: threading.Timer}
 
     def is_running(self, owner_id: int) -> bool:
         entry = self._bots.get(owner_id)
@@ -67,9 +69,30 @@ class BotManager:
         entry = self._bots.get(owner_id)
         return entry["client"] if entry else None
 
-    def start(self, owner_id: int, loop: asyncio.AbstractEventLoop):
+    def _cancel_timer(self, owner_id: int):
+        t = self._timers.pop(owner_id, None)
+        if t:
+            t.cancel()
+
+    def session_end_time(self, owner_id: int):
+        t = self._timers.get(owner_id)
+        if t and t.is_alive():
+            import time
+            remaining = t.interval - (time.time() - t._timer_start if hasattr(t, '_timer_start') else 0)
+            return max(0, remaining)
+        return None
+
+    def start(self, owner_id: int, loop: asyncio.AbstractEventLoop, check_tokens: bool = True) -> bool:
         if self.is_running(owner_id):
             self.stop(owner_id)
+
+        # بررسی توکن (اگر سیستم توکن فعال باشد و check_tokens=True)
+        if config.BOT_TOKEN and check_tokens:
+            balance = db.get_token_balance(owner_id)
+            if balance < config.TOKENS_PER_SESSION:
+                return False
+            db.deduct_tokens(owner_id, config.TOKENS_PER_SESSION)
+
         entry = {"client": None, "task": None, "stop": False}
         self._bots[owner_id] = entry
         task = asyncio.run_coroutine_threadsafe(
@@ -77,7 +100,20 @@ class BotManager:
         )
         entry["task"] = task
 
+        # خاموش شدن خودکار بعد از SESSION_HOURS ساعت
+        if config.BOT_TOKEN:
+            self._cancel_timer(owner_id)
+            timer = threading.Timer(
+                config.SESSION_HOURS * 3600, self.stop, args=[owner_id]
+            )
+            timer.daemon = True
+            timer.start()
+            self._timers[owner_id] = timer
+
+        return True
+
     def stop(self, owner_id: int):
+        self._cancel_timer(owner_id)
         entry = self._bots.get(owner_id)
         if not entry:
             return
