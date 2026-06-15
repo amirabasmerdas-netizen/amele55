@@ -3,12 +3,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_ID = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH", "")
-PHONE = os.getenv("PHONE", "")
-SESSION_NAME = os.getenv("SESSION_NAME", "amel_session")
-SECRET_KEY = os.getenv("SECRET_KEY", "amel-self55-secret-key-change-in-prod")
-PORT = int(os.getenv("PORT", "5000"))
-TIMEZONE = "Asia/Tehran"
-DB_PATH = os.getenv("DB_PATH", "amel.db")
-PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "admin1234")
+API_ID = int(os.environ.get("API_ID", 0))
+API_HASH = os.environ.get("API_HASH", "")
+SECRET_KEY = os.environ.get("SECRET_KEY", "amel_self55_secret_key_change_me")
+PORT = int(os.environ.get("PORT", 5000))
+DATABASE_PATH = os.environ.get("DATABASE_PATH", "amel.db")
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "8296865861"))
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "amele55")
+OWNER_PHONE = os.environ.get("OWNER_PHONE", "").lstrip("+")
+_render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
+SITE_URL = os.environ.get("SITE_URL", f"https://{_render_host}" if _render_host else "")
+
+BOT_NAME = "AMEL SELF55"
+BOT_VERSION = "1.2.0"
+
+WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
+
+TOKENS_PER_SESSION = 2
+SESSION_HOURS = 2
+DAILY_TOKEN_GIFT = 1
+REFERRAL_TOKENS = 50
+WELCOME_TOKENS = 10
