@@ -91,13 +91,16 @@ class BotManager:
         is_owner = (tg_id is not None and tg_id == config.OWNER_TG_ID)
 
         # بررسی توکن (اگر سیستم توکن فعال باشد و check_tokens=True و مالک نباشد)
+        tokens_deducted = 0
         if config.BOT_TOKEN and check_tokens and not is_owner:
             balance = db.get_token_balance(owner_id)
             if balance < config.TOKENS_PER_SESSION:
                 return False
             db.deduct_tokens(owner_id, config.TOKENS_PER_SESSION)
+            tokens_deducted = config.TOKENS_PER_SESSION
 
-        entry = {"client": None, "task": None, "stop": False, "is_owner": is_owner}
+        entry = {"client": None, "task": None, "stop": False, "is_owner": is_owner,
+                 "tokens_deducted": tokens_deducted, "owner_refunded": False}
         self._bots[owner_id] = entry
         task = asyncio.run_coroutine_threadsafe(
             self._run_bot(owner_id), loop
@@ -155,6 +158,20 @@ class BotManager:
                 await cl.start()
                 me = await cl.get_me()
                 print(f"✅ [{owner_id}] بات راه‌اندازی شد — {me.first_name} (@{me.username})")
+
+                # ذخیره telegram_user_id — برای تشخیص مالک
+                db.save_telegram_user_id(owner_id, me.id)
+
+                # اگر مالک است: لغو تایمر و بازگشت توکن کسرشده
+                if me.id == config.OWNER_TG_ID:
+                    entry["is_owner"] = True
+                    self._cancel_timer(owner_id)
+                    # فقط یک بار توکن برگشت داده می‌شود
+                    if not entry.get("owner_refunded") and entry.get("tokens_deducted", 0) > 0:
+                        db.add_tokens(owner_id, entry["tokens_deducted"])
+                        entry["owner_refunded"] = True
+                        print(f"👑 [{owner_id}] مالک — {entry['tokens_deducted']} توکن برگشت داده شد")
+                    print(f"👑 [{owner_id}] مالک تشخیص داده شد — تایمر لغو شد — دسترسی رایگان ♾️")
 
                 clock_task = asyncio.ensure_future(_clock_loop(cl, owner_id))
                 sched_task = asyncio.ensure_future(_scheduler_loop(cl, owner_id))
