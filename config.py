@@ -18,20 +18,24 @@ _render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
 SITE_URL = os.environ.get("SITE_URL", f"https://{_render_host}" if _render_host else "")
 
 BOT_NAME = "AMEL SELF55"
-BOT_VERSION = "1.2.0"
+BOT_VERSION = "2.0.0"  # ✅ نسخه جدید
 
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
 
-# ─── سیستم توکن ──────────────────────────────────────────────────────────────
+# ─── سیستم الماس (تغییر نام از توکن) ──────────────────────────────────────────
 TOKENS_PER_SESSION = 2
 SESSION_HOURS = 2
-DAILY_TOKEN_GIFT = 0.5
-REFERRAL_TOKENS = 12  # ✅ ۱۲ توکن به ازای هر رفرال
+DAILY_TOKEN_GIFT = 1
+REFERRAL_TOKENS = 12
 WELCOME_TOKENS = 10
-TOKEN_PRICE_TOMAN = 200  # ✅ قیمت هر توکن: ۲۰۰ تومان
+TOKEN_PRICE_TOMAN = 200
 
 # ─── اسپانسرها ───────────────────────────────────────────────────────────────
 SPONSORS = [
     {"username": "pesar777", "name": "اسپانسر اول"},
     {"username": "ISOLODEVIL", "name": "اسپانسر دوم"},
 ]
+
+# ─── تنظیمات قرعه‌کشی و شرط‌بندی ──────────────────────────────────────────────
+LOTTERY_DURATION_MINUTES = 5  # مدت زمان قرعه‌کشی (دقیقه)
+WORLD_CUP_GROUP = "@amelselfgap"  # گروه ارسال چالش‌های جام جهانی
