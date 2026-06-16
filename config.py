@@ -19,6 +19,7 @@ OWNER_PHONE = os.environ.get("OWNER_PHONE", "").lstrip("+")
 _render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
 SITE_URL = os.environ.get("SITE_URL", f"https://{_render_host}" if _render_host else "")
 
+# ✅ این دو خط اضافه شد
 BOT_NAME = "AMEL SELF55"
 BOT_VERSION = "2.0.0"
 
