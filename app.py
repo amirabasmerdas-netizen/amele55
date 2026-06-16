@@ -82,13 +82,22 @@ def health():
 @app.route("/")
 @login_required
 def index():
-    if db.get_setting(owner_id(), "logged_in") != "1":
+    oid = owner_id()
+    account = db.get_account(oid)
+    
+    # اگر حساب کاربری در دیتابیس پیدا نشد، سشن را پاک کن و به لاگین بفرست
+    if not account:
+        session.pop("owner_id", None)
+        return redirect(url_for("panel_login_page"))
+        
+    if db.get_setting(oid, "logged_in") != "1":
         return redirect(url_for("tg_login_page"))
+        
     return render_template(
         "panel.html",
         page="panel",
-        username=db.get_account(owner_id())["username"],
-        owner_id=owner_id(),
+        username=account["username"],
+        owner_id=oid,
     )
 
 
