@@ -181,7 +181,13 @@ def send_code():
         cl = TelegramClient(StringSession(), config.API_ID, config.API_HASH)
         await cl.connect()
         result = await cl.send_code_request(phone)
-        _login_clients[oid] = cl
+        # ذخیره session موقت در دیتابیس — مقاوم در برابر restart سرور
+        partial_sess = cl.session.save()
+        await cl.disconnect()
+        db.set_setting(oid, "_login_phone", phone)
+        db.set_setting(oid, "_login_phone_hash", result.phone_code_hash)
+        db.set_setting(oid, "_login_partial_session", partial_sess)
+        # همچنین در حافظه برای سرعت
         _phone_hashes[oid] = result.phone_code_hash
         _phone_numbers[oid] = phone
         return {"ok": True}
@@ -202,18 +208,30 @@ def verify_code():
     code = data.get("code", "").strip()
     if not code:
         return jsonify({"ok": False, "error": "کد الزامی است"}), 400
-    cl = _login_clients.get(oid)
-    if not cl:
-        return jsonify({"ok": False, "error": "ابتدا کد ارسال کنید"}), 400
+
+    # اول از حافظه، اگر نبود از دیتابیس بخوان
+    phone = _phone_numbers.get(oid) or db.get_setting(oid, "_login_phone")
+    ph = _phone_hashes.get(oid) or db.get_setting(oid, "_login_phone_hash")
+    partial_sess = db.get_setting(oid, "_login_partial_session")
+
+    if not phone or not ph or not partial_sess:
+        return jsonify({"ok": False, "error": "ابتدا کد ارسال کنید (مجدداً شماره خود را وارد کنید)"}), 400
 
     async def _verify():
-        phone = _phone_numbers[oid]
-        ph = _phone_hashes[oid]
+        cl = TelegramClient(StringSession(partial_sess), config.API_ID, config.API_HASH)
+        await cl.connect()
         await cl.sign_in(phone=phone, code=code, phone_code_hash=ph)
         me = await cl.get_me()
         sess = cl.session.save()
         await cl.disconnect()
+        # پاک کردن داده‌های موقت
         _login_clients.pop(oid, None)
+        _phone_hashes.pop(oid, None)
+        _phone_numbers.pop(oid, None)
+        db.set_setting(oid, "_login_phone", "")
+        db.set_setting(oid, "_login_phone_hash", "")
+        db.set_setting(oid, "_login_partial_session", "")
+        # ذخیره session نهایی
         db.set_setting(oid, "session_data", sess)
         db.set_setting(oid, "logged_in", "1")
         db.save_telegram_user_id(oid, me.id)
@@ -224,6 +242,7 @@ def verify_code():
         bot_manager.start(oid, get_loop(), check_tokens=False)
         return jsonify(result)
     except SessionPasswordNeededError:
+        # session موقت رو نگه دار تا 2FA انجام بشه
         return jsonify({"ok": False, "need_2fa": True}), 200
     except (PhoneCodeInvalidError, PhoneCodeExpiredError):
         return jsonify({"ok": False, "error": "کد اشتباه یا منقضی شده"}), 400
@@ -239,16 +258,28 @@ def verify_2fa():
     password = data.get("password", "").strip()
     if not password:
         return jsonify({"ok": False, "error": "رمز دو مرحله‌ای الزامی است"}), 400
-    cl = _login_clients.get(oid)
-    if not cl:
-        return jsonify({"ok": False, "error": "ابتدا کد ارسال کنید"}), 400
+
+    phone = _phone_numbers.get(oid) or db.get_setting(oid, "_login_phone")
+    ph = _phone_hashes.get(oid) or db.get_setting(oid, "_login_phone_hash")
+    partial_sess = db.get_setting(oid, "_login_partial_session")
+    code = data.get("_code", "")  # کد قبلی که با 2FA همراه بود
+
+    if not partial_sess:
+        return jsonify({"ok": False, "error": "ابتدا کد تأیید را وارد کنید"}), 400
 
     async def _verify():
+        cl = TelegramClient(StringSession(partial_sess), config.API_ID, config.API_HASH)
+        await cl.connect()
         await cl.sign_in(password=password)
         me = await cl.get_me()
         sess = cl.session.save()
         await cl.disconnect()
         _login_clients.pop(oid, None)
+        _phone_hashes.pop(oid, None)
+        _phone_numbers.pop(oid, None)
+        db.set_setting(oid, "_login_phone", "")
+        db.set_setting(oid, "_login_phone_hash", "")
+        db.set_setting(oid, "_login_partial_session", "")
         db.set_setting(oid, "session_data", sess)
         db.set_setting(oid, "logged_in", "1")
         db.save_telegram_user_id(oid, me.id)
