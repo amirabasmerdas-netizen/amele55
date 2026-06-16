@@ -12,9 +12,8 @@ DATABASE_PATH = os.environ.get("DATABASE_PATH", "amel.db")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "8296865861"))
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "amele55")
-# شماره تلفن مالک برای تشخیص قطعی (مثال: +989123456789)
 OWNER_PHONE = os.environ.get("OWNER_PHONE", "").lstrip("+")
-# اگر SITE_URL تنظیم نشده، از hostname خودکار Render تشخیص بده
+
 _render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
 SITE_URL = os.environ.get("SITE_URL", f"https://{_render_host}" if _render_host else "")
 
@@ -23,12 +22,16 @@ BOT_VERSION = "1.2.0"
 
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
 
+# ─── سیستم توکن ──────────────────────────────────────────────────────────────
 TOKENS_PER_SESSION = 2
 SESSION_HOURS = 2
 DAILY_TOKEN_GIFT = 0.5
-REFERRAL_TOKENS = 12
+REFERRAL_TOKENS = 12  # ✅ ۱۲ توکن به ازای هر رفرال
 WELCOME_TOKENS = 10
-# ... (سایر تنظیمات) ...
-# آیدی کانال یا گروهی که کاربر باید عضو باشد (با @ شروع شود)
-# اگر نمی‌خواهید فعلاً فعال باشد، آن را خالی بگذارید: ""
-FORCED_CHANNEL = os.environ.get("FORCED_CHANNEL", "@amelself55") 
+TOKEN_PRICE_TOMAN = 200  # ✅ قیمت هر توکن: ۲۰۰ تومان
+
+# ─── اسپانسرها ───────────────────────────────────────────────────────────────
+SPONSORS = [
+    {"username": "pesar777", "name": "اسپانسر اول"},
+    {"username": "ISOLODEVIL", "name": "اسپانسر دوم"},
+]
