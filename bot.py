@@ -4,7 +4,6 @@ import os
 import datetime
 import random
 import threading
-import time
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest
@@ -30,12 +29,6 @@ _ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 LINK_PATTERN = re.compile(
     r"(https?://\S+|t\.me/\S+|telegram\.me/\S+|www\.\S+)", re.IGNORECASE
 )
-
-# ─── سیستم محدودیت زمانی برای منشی و دوست ────────────────────────────────────
-_last_secretary_reply = {}  # {chat_id: timestamp}
-_last_friend_reply = {}     # {sender_id: timestamp}
-SECRETARY_COOLDOWN = 86400  # 24 ساعت (86400 ثانیه)
-FRIEND_COOLDOWN = 3600      # 1 ساعت (3600 ثانیه)
 
 
 def _convert_font(text, chars):
@@ -82,6 +75,7 @@ class BotManager:
     def session_end_time(self, owner_id: int):
         t = self._timers.get(owner_id)
         if t and t.is_alive():
+            import time
             remaining = t.interval - (time.time() - t._timer_start if hasattr(t, '_timer_start') else 0)
             return max(0, remaining)
         return None
@@ -217,42 +211,6 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
         chat_id = getattr(chat, "id", 0)
         text = msg.text or ""
 
-        # ✅ بررسی آیا ربات تگ شده است (برای گروه‌ها)
-        is_tagged = False
-        if not event.is_private:
-            me = await cl.get_me()
-            # بررسی منشن
-            if msg.entities:
-                for entity in msg.entities:
-                    if hasattr(entity, 'user_id') and entity.user_id == me.id:
-                        is_tagged = True
-                        break
-            # بررسی ریپلای به ربات
-            replied_msg = await event.get_reply_message()
-            if replied_msg and replied_msg.sender_id == me.id:
-                is_tagged = True
-            # بررسی یوزرنیم ربات در متن
-            if me.username and me.username.lower() in text.lower():
-                is_tagged = True
-
-        # ✅ اگر در گروه است و تگ نشده، فقط کارهای خودکار را انجام بده (بدون پاسخ)
-        if not event.is_private and not is_tagged:
-            # فقط سین خودکار و ذخیره مدیا در گروه‌ها
-            if db.get_setting(owner_id, "auto_seen_active") == "1":
-                try:
-                    await cl.send_read_acknowledge(chat_id, msg)
-                except Exception:
-                    pass
-            
-            if db.get_setting(owner_id, "auto_save_media") == "1" and msg.media:
-                try:
-                    media_dir = f"saved_media/{owner_id}"
-                    os.makedirs(media_dir, exist_ok=True)
-                    await cl.download_media(msg, file=media_dir + "/")
-                except Exception:
-                    pass
-            return  # بقیه کارها را انجام نده
-
         if db.is_silent_chat(owner_id, chat_id) or db.is_silent_user(owner_id, sender_id):
             return
 
@@ -287,47 +245,34 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
             except Exception:
                 pass
 
-        # ✅ منشی (فقط پیوی - با محدودیت 24 ساعت)
+        # منشی (فقط پیوی)
         if db.get_setting(owner_id, "secretary_active") == "1" and event.is_private:
-            now = time.time()
-            last_reply = _last_secretary_reply.get(chat_id, 0)
-            
-            if now - last_reply >= SECRETARY_COOLDOWN:
-                sec_msg = db.get_setting(owner_id, "secretary_message", "در حال حاضر در دسترس نیستم.")
-                try:
-                    await event.reply(f"🤖 منشی خودکار:\n{sec_msg}")
-                    _last_secretary_reply[chat_id] = now
-                except Exception:
-                    pass
+            sec_msg = db.get_setting(owner_id, "secretary_message", "در حال حاضر در دسترس نیستم.")
+            try:
+                await event.reply(f"🤖 منشی خودکار:\n{sec_msg}")
+            except Exception:
+                pass
             return
 
-        # ✅ ری‌اکشن خودکار (اصلاح شده)
+        # ری‌اکشن خودکار
         if db.get_setting(owner_id, "auto_reaction_active") == "1":
             emoji = db.get_setting(owner_id, "auto_reaction_emoji", "❤️")
             try:
                 from telethon.tl.functions.messages import SendReactionRequest
                 from telethon.tl.types import ReactionEmoji
                 await cl(SendReactionRequest(
-                    peer=chat_id,
-                    msg_id=msg.id,
+                    peer=chat_id, msg_id=msg.id,
                     reaction=[ReactionEmoji(emoticon=emoji)],
-                    big=False,
-                    add_to_recent=True
                 ))
-            except Exception as e:
-                print(f"⚠️ خطا در ری‌اکشن: {e}")
+            except Exception:
+                pass
 
-        # ✅ پاسخ خودکار محبت‌آمیز به دوستان (فقط در پیوی - با محدودیت 1 ساعت)
+        # ✅ پاسخ خودکار محبت‌آمیز به دوستان (فقط در پیوی)
         if event.is_private and db.is_friend(owner_id, sender_id):
-            now = time.time()
-            last_reply = _last_friend_reply.get(sender_id, 0)
-            
-            if now - last_reply >= FRIEND_COOLDOWN:
-                try:
-                    await event.reply(random.choice(FRIEND_REPLIES))
-                    _last_friend_reply[sender_id] = now
-                except Exception:
-                    pass
+            try:
+                await event.reply(random.choice(FRIEND_REPLIES))
+            except Exception:
+                pass
 
         # پاسخ به دشمن
         if db.get_setting(owner_id, "enemy_reply_active") == "1" and db.is_enemy(owner_id, sender_id):
@@ -343,7 +288,7 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
             except Exception:
                 pass
 
-        # قفل پیوی (حذف پیام ورودی در پیوی)
+        # ✅ قفل پیوی (حذف پیام ورودی در پیوی)
         if db.get_setting(owner_id, "private_lock_active") == "1" and event.is_private:
             try:
                 await msg.delete()
@@ -354,7 +299,7 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
     async def on_outgoing(event):
         text = event.raw_text.strip()
 
-        # دستورات همیشه فعال
+        # ─── دستورات همیشه فعال (حتی وقتی سلف خاموش است) ─────────────────
         if text == "سلف روشن":
             db.set_setting(owner_id, "self_bot_active", "1")
             await _safe_edit(event, owner_id, "✅ سلف‌بات روشن شد.")
@@ -473,7 +418,7 @@ async def _handle_command(cl, event, text, owner_id, entry):
 
     # ─── منشی ────────────────────────────────────────────────────────────────
     elif text == "منشی روشن":
-        ss("secretary_active", "1"); await edit("🤖 منشی خودکار روشن شد.\n💡 هر کاربر فقط هر 24 ساعت یک بار پاسخ می‌گیرد.")
+        ss("secretary_active", "1"); await edit("🤖 منشی خودکار روشن شد.")
     elif text == "منشی خاموش":
         ss("secretary_active", "0"); await edit("🤖 منشی خودکار خاموش شد.")
     elif text.startswith("پیام منشی "):
@@ -829,7 +774,6 @@ def _help_text():
 🔹 منشی:
 • منشی روشن / خاموش
 • پیام منشی [متن]
-💡 هر کاربر فقط هر 24 ساعت یک بار پاسخ می‌گیرد
 
 🔹 امنیت:
 • ضد حذف روشن / خاموش
@@ -868,21 +812,14 @@ def _help_text():
 • لیست فونت — نمایش نمونه‌ها
 
 💡 نکته: فونت انتخابی روی ساعت نام/بیو هم اعمال می‌شود!
-💡 نکته: در گروه‌ها فقط وقتی تگ شوید پاسخ می‌دهد!
-💡 نکته: پاسخ به دوستان هر 1 ساعت یک بار!
 """
 
 
-# ─── حلقه‌های پس‌زمینه ──────────────────────────────────────────────────────────# ─── حلقه‌های پس‌زمینه ──────────────────────────────────────────────────────────
+# ─── حلقه‌های پس‌زمینه ──────────────────────────────────────────────────────────
 async def _clock_loop(cl, owner_id):
     while True:
         try:
-            # ✅ محاسبه دقیق زمان باقی‌مانده تا شروع دقیقه بعدی (برای حذف تاخیر)
-            now = datetime.datetime.now()
-            seconds_to_next_minute = 60 - now.second
-            await asyncio.sleep(seconds_to_next_minute)
-
-            # به‌روزرسانی بلافاصله پس از تغییر دقیقه
+            # ✅ اعمال فونت روی ساعت
             time_str = persian_time()
             font_id = db.get_setting(owner_id, "selected_font", "0")
             fn = FONTS.get(font_id, FONTS["0"])
@@ -892,7 +829,6 @@ async def _clock_loop(cl, owner_id):
                 await cl(UpdateProfileRequest(last_name=styled_time[:64]))
             if db.get_setting(owner_id, "clock_bio_active") == "1":
                 await cl(UpdateProfileRequest(about=f"⏰ {styled_time}"[:70]))
-                
         except Exception:
             pass
         await asyncio.sleep(60)
