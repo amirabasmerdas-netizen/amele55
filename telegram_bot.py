@@ -57,7 +57,7 @@ def start_token_bot():
             reply_markup=markup
         )
 
-    # ─── /start ─────────────────────────────────────────────────────────────
+    # ─── /start (در PV و گروه کار می‌کند) ────────────────────────────────────
     @_bot.message_handler(commands=["start"])
     def cmd_start(message):
         try:
@@ -106,10 +106,14 @@ def start_token_bot():
 
             stats = db.get_token_stats(account["id"])
             
-            if tg_id == OWNER_TG_ID:
-                markup = _owner_keyboard()
+            # ✅ فقط در PV کیبورد اصلی نمایش داده شود
+            if message.chat.type == 'private':
+                if tg_id == OWNER_TG_ID:
+                    markup = _owner_keyboard()
+                else:
+                    markup = _user_keyboard()
             else:
-                markup = _user_keyboard()
+                markup = None  # در گروه کیبورد نمایش نده
 
             token_price = getattr(config, 'TOKEN_PRICE_TOMAN', 200)
             
@@ -123,21 +127,18 @@ def start_token_bot():
                 reply_markup=markup
             )
 
-            # ✅ نمایش اسپانسرها
-            sponsors = getattr(config, 'SPONSORS', [])
-            if sponsors:
-                sponsors_text = "🤝 <b>اسپانسرهای رسمی پروژه:</b>\n"
-                for sp in sponsors:
-                    sponsors_text += f"🔸 @{sp['username']}\n"
-                sponsors_text += f"\n👑 <b>مالک و پشتیبانی:</b> @{config.OWNER_USERNAME}"
-                _bot.send_message(message.chat.id, sponsors_text)
+            # ✅ نمایش اسپانسرها فقط در PV
+            if message.chat.type == 'private':
+                sponsors = getattr(config, 'SPONSORS', [])
+                if sponsors:
+                    sponsors_text = "🤝 <b>اسپانسرهای رسمی پروژه:</b>\n"
+                    for sp in sponsors:
+                        sponsors_text += f"🔸 @{sp['username']}\n"
+                    sponsors_text += f"\n👑 <b>مالک و پشتیبانی:</b> @{config.OWNER_USERNAME}"
+                    _bot.send_message(message.chat.id, sponsors_text)
         
         except Exception as e:
             print(f"❌ خطا در cmd_start: {e}")
-            try:
-                _bot.reply_to(message, f"⚠️ خطا رخ داد: {str(e)}\n\nلطفاً دوباره /start بزنید.")
-            except:
-                pass
 
     # ─── هندلر دکمه بررسی عضویت ─────────────────────────────────────────────
     @_bot.callback_query_handler(func=lambda call: call.data == "check_join")
@@ -168,8 +169,8 @@ def start_token_bot():
             return False
         return True
 
-    # ─── دکمه‌های منوی اصلی ─────────────────────────────────────────────────
-    @_bot.message_handler(func=lambda m: m.text == "💰 موجودی")
+    # ─── ✅ دکمه‌های منوی اصلی (فقط در PV کار می‌کنند) ─────────────────────
+    @_bot.message_handler(func=lambda m: m.text == "💰 موجودی", chat_types=['private'])
     def cmd_balance(message):
         try:
             if not require_membership(message): return
@@ -190,7 +191,7 @@ def start_token_bot():
         except Exception as e:
             print(f"❌ خطا در cmd_balance: {e}")
 
-    @_bot.message_handler(func=lambda m: m.text == "🎁 هدیه روزانه")
+    @_bot.message_handler(func=lambda m: m.text == "🎁 هدیه روزانه", chat_types=['private'])
     def cmd_daily(message):
         try:
             if not require_membership(message): return
@@ -206,7 +207,7 @@ def start_token_bot():
         except Exception as e:
             print(f"❌ خطا در cmd_daily: {e}")
 
-    @_bot.message_handler(func=lambda m: m.text == "🔗 رفرال")
+    @_bot.message_handler(func=lambda m: m.text == "🔗 رفرال", chat_types=['private'])
     def cmd_referral(message):
         try:
             if not require_membership(message): return
@@ -227,7 +228,7 @@ def start_token_bot():
         except Exception as e:
             print(f"❌ خطا در cmd_referral: {e}")
 
-    @_bot.message_handler(func=lambda m: m.text == "🛒 خرید توکن")
+    @_bot.message_handler(func=lambda m: m.text == "🛒 خرید توکن", chat_types=['private'])
     def cmd_buy(message):
         try:
             if not require_membership(message): return
@@ -252,8 +253,8 @@ def start_token_bot():
         except Exception as e:
             print(f"❌ خطا در cmd_buy: {e}")
 
-    # ─── دستورات اختصاصی مالک ────────────────────────────────────────────────
-    @_bot.message_handler(func=lambda m: m.text == "📢 مدیریت چنل‌ها")
+    # ─── ✅ دستورات اختصاصی مالک (فقط در PV) ────────────────────────────────
+    @_bot.message_handler(func=lambda m: m.text == "📢 مدیریت چنل‌ها", chat_types=['private'])
     def cmd_admin_channels(message):
         try:
             if message.from_user.id != OWNER_TG_ID: return
@@ -348,8 +349,8 @@ def start_token_bot():
         except Exception as e:
             print(f"❌ خطا در cmd_users: {e}")
 
-    # ─── پیام‌های ناشناخته ──────────────────────────────────────────────────
-    @_bot.message_handler(func=lambda m: True)
+    # ─── ✅ پیام‌های ناشناخته (فقط در PV) ───────────────────────────────────
+    @_bot.message_handler(func=lambda m: True, chat_types=['private'])
     def cmd_unknown(message):
         try:
             account = db.get_account_by_tg_id(message.from_user.id)
