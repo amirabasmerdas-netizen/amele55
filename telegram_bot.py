@@ -114,7 +114,6 @@ def start_token_bot():
         print("⚠️ BOT_TOKEN تنظیم نشده — ربات الماس غیرفعال است")
         return
 
-    # ✅ تغییر مهم: threaded=True برای سرعت بالاتر
     _bot = telebot.TeleBot(config.BOT_TOKEN, parse_mode="HTML", threaded=True, num_threads=4)
 
     try:
@@ -201,20 +200,17 @@ def start_token_bot():
             parts = message.text.strip().split()
             ref_code = parts[1] if len(parts) > 1 else None
             
-            # پردازش رفرال (غیر بلاک‌کننده)
             if ref_code and ref_code.startswith("ref_"):
                 try:
                     referrer_id = int(ref_code[4:])
                     threading.Thread(target=_process_referral_async, args=(referrer_id, tg_id), daemon=True).start()
                 except: pass
 
-            # بررسی عضویت (با cache)
             is_member, missing = _check_membership_cached(tg_id)
             if not is_member:
                 send_forced_channels_menu(message, missing)
                 return
 
-            # دریافت حساب (با cache)
             account = _get_account_cached(tg_id)
             site_url = getattr(config, "SITE_URL", "")
 
@@ -245,12 +241,11 @@ def start_token_bot():
                 f"👋 سلام <b>{account['username']}</b>!\n\n"
                 f"💎 موجودی: <b>{stats['balance']}</b>\n"
                 f"📊 کل دریافتی: <b>{stats['total_earned']}</b>\n\n"
-                f"⚡ هر <b>۲ الماس</b> = <b>۲ ساعت</b> سلف‌بات\n"
+                f"⚡ هر <b>{config.TOKENS_PER_SESSION} الماس</b> = <b>{config.SESSION_HOURS} ساعت</b> سلف‌بات\n"
                 f"💰 قیمت هر الماس: <b>{token_price} تومان</b>",
                 reply_markup=markup
             )
 
-            # اسپانسرها فقط در PV و فقط یک بار
             if message.chat.type == 'private':
                 sponsors = getattr(config, 'SPONSORS', [])
                 if sponsors:
@@ -263,7 +258,6 @@ def start_token_bot():
             print(f"❌ خطا در cmd_start: {e}")
 
     def _process_referral_async(referrer_id, tg_id):
-        """پردازش رفرال در thread جداگانه"""
         try:
             if db.process_referral(referrer_id, tg_id):
                 referrer_tg = db.get_telegram_id_by_owner(referrer_id)
@@ -280,13 +274,14 @@ def start_token_bot():
     @_bot.callback_query_handler(func=lambda call: call.data == "check_join")
     def callback_check_join(call):
         try:
-            # پاک کردن cache قبل از بررسی مجدد
             cache.invalidate(f"membership_{call.from_user.id}")
             is_member, missing = _check_membership_cached(call.from_user.id)
             if is_member:
                 _bot.answer_callback_query(call.id, "عضویت تأیید شد! ✅")
-                try: _bot.delete_message(call.message.chat.id, call.message.message_id)
-                except: pass
+                try: 
+                    _bot.delete_message(call.message.chat.id, call.message.message_id)
+                except: 
+                    pass
                 cmd_start(call.message)
             else:
                 _bot.answer_callback_query(call.id, f"هنوز در {len(missing)} کانال عضو نشده‌اید! ❌", show_alert=True)
@@ -294,7 +289,7 @@ def start_token_bot():
             print(f"❌ خطا در callback_check_join: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # دکمه‌های منوی اصلی - بهینه‌شده
+    # دکمه‌های منوی اصلی
     # ══════════════════════════════════════════════════════════════════════════
     @_bot.message_handler(func=lambda m: m.text == "💎 موجودی", chat_types=['private'])
     def cmd_balance(message):
@@ -327,7 +322,6 @@ def start_token_bot():
                 return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
             
             success, msg = db.claim_daily_token(account["id"])
-            # پاک کردن cache بعد از تغییر موجودی
             cache.invalidate(f"account_{message.from_user.id}")
             
             if success:
@@ -386,64 +380,90 @@ def start_token_bot():
     # ══════════════════════════════════════════════════════════════════════════
     @_bot.message_handler(func=lambda m: m.text == "📢 مدیریت", chat_types=['private'])
     def cmd_admin_panel(message):
-        if message.from_user.id != OWNER_TG_ID: return
+        if message.from_user.id != OWNER_TG_ID: 
+            return
         _bot.reply_to(message, 
             "📢 <b>پنل مدیریت مالک</b>\n\nیکی از گزینه‌های زیر را انتخاب کنید:",
             reply_markup=_admin_panel_keyboard())
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 🎯 Callback handler پنل مدیریت - بهینه‌شده
+    # 🎯 Callback handler پنل مدیریت - اصلاح‌شده
     # ══════════════════════════════════════════════════════════════════════════
-    @_bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
+    @_bot.callback_query_handler(func=lambda call: call.data.startswith("admin_") or call.data.startswith("rmch_") or call.data.startswith("wcwin_") or call.data.startswith("bet_wc_") or call.data.startswith("join_lottery_"))
     def callback_admin(call):
         if call.from_user.id != OWNER_TG_ID:
             return _bot.answer_callback_query(call.id, "❌ فقط مالک دسترسی دارد", show_alert=True)
         
         try:
-            action = call.data[6:]  # حذف "admin_"
+            data = call.data
             
-            if action in ("panel", "back"):
+            # ─── بازگشت به پنل اصلی ────────────────────────────────────────
+            if data == "admin_panel" or data == "admin_back":
                 _bot.edit_message_text(
-                    call.message.chat.id, call.message.message_id,
                     "📢 <b>پنل مدیریت مالک</b>\n\nیکی از گزینه‌های زیر را انتخاب کنید:",
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
                     reply_markup=_admin_panel_keyboard()
                 )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action == "channels":
+            # ─── چنل‌های اجباری ────────────────────────────────────────────
+            elif data == "admin_channels":
                 channels = db.get_forced_channels()
                 markup = types.InlineKeyboardMarkup(row_width=1)
                 if channels:
                     text = "📢 <b>چنل‌های اجباری فعلی:</b>\n\n"
                     for ch in channels:
                         text += f"🔸 <code>{ch}</code>\n"
-                        markup.add(types.InlineKeyboardButton(f"❌ حذف {ch}", callback_data=f"rmch_{ch}"))
+                        # ✅ اصلاح: فقط یوزرنیم بدون @ رو برای callback بفرست
+                        ch_clean = ch.lstrip("@")
+                        markup.add(types.InlineKeyboardButton(f"❌ حذف {ch}", callback_data=f"rmch_{ch_clean}"))
                 else:
                     text = "📋 لیست چنل‌ها خالی است.\n\n"
                 text += "\nبرای افزودن چنل جدید از دکمه زیر استفاده کنید:"
                 markup.add(types.InlineKeyboardButton("➕ افزودن چنل جدید", callback_data="addch_prompt"))
                 markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id, text, reply_markup=markup)
+                _bot.edit_message_text(
+                    text,
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action.startswith("rmch_"):
-                ch = call.data[5:]
+            # ─── حذف چنل ────────────────────────────────────────────────────
+            elif data.startswith("rmch_"):
+                ch = data[5:]  # یوزرنیم بدون @
+                if not ch.startswith("@"):
+                    ch = "@" + ch
                 if db.remove_forced_channel(ch):
                     cache.invalidate("membership_")
                     _bot.answer_callback_query(call.id, f"✅ چنل {ch} حذف شد")
-                    # Refresh لیست
+                    # بازگشت به لیست چنل‌ها
                     call.data = "admin_channels"
                     callback_admin(call)
                 else:
                     _bot.answer_callback_query(call.id, "❌ خطا در حذف")
+                return
             
-            elif action == "addch_prompt":
+            # ─── افزودن چنل ──────────────────────────────────────────────────
+            elif data == "addch_prompt":
                 _owner_states[call.from_user.id] = {"state": "waiting_channel"}
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_panel"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id,
+                _bot.edit_message_text(
                     "📝 آیدی چنل را ارسال کنید (با @ شروع شود):\n\nمثال: <code>@mychannel</code>",
-                    reply_markup=markup)
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action == "users":
+            # ─── کاربران ──────────────────────────────────────────────────────
+            elif data == "admin_users":
                 accounts = db.get_all_accounts()
                 if not accounts:
                     text = "هیچ کاربری ثبت نشده."
@@ -455,27 +475,47 @@ def start_token_bot():
                     text = "\n".join(lines)
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id, text, reply_markup=markup)
+                _bot.edit_message_text(
+                    text,
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action == "wc":
+            # ─── جام جهانی ────────────────────────────────────────────────────
+            elif data == "admin_wc":
                 markup = types.InlineKeyboardMarkup(row_width=1)
                 markup.add(types.InlineKeyboardButton("➕ ایجاد چالش جدید", callback_data="wc_new"))
                 markup.add(types.InlineKeyboardButton("📋 چالش‌های فعال", callback_data="wc_list"))
                 markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id,
+                _bot.edit_message_text(
                     "🏆 <b>مدیریت چالش‌های جام جهانی</b>\n\nیک گزینه را انتخاب کنید:",
-                    reply_markup=markup)
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action == "wc_new":
+            # ─── ایجاد چالش جدید ────────────────────────────────────────────
+            elif data == "wc_new":
                 _owner_states[call.from_user.id] = {"state": "wc_team1", "data": {}}
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_wc"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id,
+                _bot.edit_message_text(
                     "🏆 <b>ایجاد چالش جدید</b>\n\n"
                     "📝 مرحله ۱ از ۴:\nنام <b>تیم اول</b> را ارسال کنید:\n\nمثال: <code>ایران</code>",
-                    reply_markup=markup)
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action == "wc_list":
+            # ─── لیست چالش‌های فعال ─────────────────────────────────────────
+            elif data == "wc_list":
                 challenges = db.get_active_challenges()
                 if not challenges:
                     text = "📋 هیچ چالش فعالی وجود ندارد."
@@ -483,19 +523,27 @@ def start_token_bot():
                     markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_wc"))
                 else:
                     text = "🏆 <b>چالش‌های فعال:</b>\n\n"
-                    markup = types.InlineKeyboardMarkup(row_width=1)
+                    markup = types.InlineKeyboardMarkup(row_width=2)
                     for c in challenges:
                         text += f"<b>ID {c['id']}:</b> {c['team1']} vs {c['team2']}\n"
                         text += f"⏰ {c['match_time']} | 💎 {c['bet_amount']}\n\n"
                         markup.add(
-                            types.InlineKeyboardButton(f"✅ برنده: {c['team1']}", callback_data=f"wcwin_{c['id']}_{c['team1']}"),
-                            types.InlineKeyboardButton(f"✅ برنده: {c['team2']}", callback_data=f"wcwin_{c['id']}_{c['team2']}")
+                            types.InlineKeyboardButton(f"✅ {c['team1']}", callback_data=f"wcwin_{c['id']}_{c['team1']}"),
+                            types.InlineKeyboardButton(f"✅ {c['team2']}", callback_data=f"wcwin_{c['id']}_{c['team2']}")
                         )
                     markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_wc"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id, text, reply_markup=markup)
+                _bot.edit_message_text(
+                    text,
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action.startswith("wcwin_"):
-                parts = call.data.split("_", 2)
+            # ─── تعیین برنده چالش ────────────────────────────────────────────
+            elif data.startswith("wcwin_"):
+                parts = data.split("_", 2)
                 challenge_id = int(parts[1])
                 winner_team = parts[2]
                 db.set_challenge_winner(challenge_id, winner_team)
@@ -508,37 +556,57 @@ def start_token_bot():
                         if r["result"] == "won":
                             try:
                                 _bot.send_message(r["user_tg_id"], f"🎉 تبریک! شرط شما درست بود.\n💎 <b>{r['amount']} الماس</b> دریافت کردید.")
-                            except: pass
+                            except: 
+                                pass
                 else:
                     _bot.answer_callback_query(call.id, f"❌ خطا: {results}", show_alert=True)
+                return
             
-            elif action == "lottery":
+            # ─── قرعه‌کشی ────────────────────────────────────────────────────
+            elif data == "admin_lottery":
                 _owner_states[call.from_user.id] = {"state": "lottery_amount"}
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_panel"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id,
+                _bot.edit_message_text(
                     "🎲 <b>ایجاد قرعه‌کشی گروهی</b>\n\n"
                     "💎 مبلغ جایزه را ارسال کنید (الماس):\n\nمثال: <code>100</code>\n\n"
                     "⚠️ قرعه‌کشی در گروه <code>@amelselfgap</code> ایجاد می‌شود.",
-                    reply_markup=markup)
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action == "transfer":
-                _owner_states[call.from_user.id] = {"state": "transfer_user"}
+            # ─── انتقال الماس ─────────────────────────────────────────────────
+            elif data == "admin_transfer":
+                _owner_states[call.from_user.id] = {"state": "transfer_user", "data": {}}
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_panel"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id,
+                _bot.edit_message_text(
                     "💎 <b>انتقال الماس (از طرف سیستم)</b>\n\n"
                     "📝 یوزرنیم کاربر مقصد را ارسال کنید:\n\nمثال: <code>ali</code>",
-                    reply_markup=markup)
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
-            elif action == "give":
-                _owner_states[call.from_user.id] = {"state": "give_user"}
+            # ─── دادن الماس ──────────────────────────────────────────────────
+            elif data == "admin_give":
+                _owner_states[call.from_user.id] = {"state": "give_user", "data": {}}
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_panel"))
-                _bot.edit_message_text(call.message.chat.id, call.message.message_id,
+                _bot.edit_message_text(
                     "💰 <b>دادن الماس به کاربر</b>\n\n"
                     "📝 یوزرنیم کاربر را ارسال کنید:\n\nمثال: <code>ali</code>",
-                    reply_markup=markup)
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=markup
+                )
+                _bot.answer_callback_query(call.id)
+                return
             
             else:
                 _bot.answer_callback_query(call.id, "❌ گزینه نامعتبر")
@@ -547,10 +615,11 @@ def start_token_bot():
             print(f"❌ خطا در callback_admin: {e}")
             try:
                 _bot.answer_callback_query(call.id, f"❌ خطا: {str(e)[:100]}", show_alert=True)
-            except: pass
+            except: 
+                pass
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 📨 State handler
+    # 📨 State handler - اصلاح‌شده
     # ══════════════════════════════════════════════════════════════════════════
     @_bot.message_handler(func=lambda m: m.from_user.id == OWNER_TG_ID and m.from_user.id in _owner_states, chat_types=['private'])
     def handle_owner_state(message):
@@ -683,7 +752,8 @@ def start_token_bot():
                 if to_tg_id:
                     try:
                         _bot.send_message(to_tg_id, f"🎁 <b>{amount} الماس</b> از طرف سیستم دریافت کردید!\n💎 موجودی جدید: <b>{new_balance}</b>")
-                    except: pass
+                    except: 
+                        pass
                 
                 _bot.reply_to(message, 
                     f"✅ <b>{amount} الماس</b> به <b>{to_account['username']}</b> داده شد.\n💎 موجودی جدید: <b>{new_balance}</b>",
@@ -716,7 +786,8 @@ def start_token_bot():
                 if tg_id:
                     try:
                         _bot.send_message(tg_id, f"🎁 <b>{amount} الماس</b> از طرف مالک دریافت کردید!\n💎 موجودی جدید: <b>{new_balance}</b>")
-                    except: pass
+                    except: 
+                        pass
                 
                 _bot.reply_to(message, 
                     f"✅ <b>{amount}</b> الماس به <b>{account['username']}</b> داده شد.\n"
@@ -760,7 +831,6 @@ def start_token_bot():
             challenge_id = int(parts[2])
             team_choice = parts[3]
             
-            # Cache برای challenge
             cache_key = f"challenge_{challenge_id}"
             challenge = cache.get(cache_key)
             if challenge is None:
@@ -785,19 +855,19 @@ def start_token_bot():
     # ══════════════════════════════════════════════════════════════════════════
     @_bot.message_handler(commands=["addchannel", "removechannel", "give", "users", "wc_create", "wc_winner", "lottery", "transfer"])
     def cmd_text_commands(message):
-        if message.from_user.id != OWNER_TG_ID: return
+        if message.from_user.id != OWNER_TG_ID: 
+            return
         _bot.reply_to(message, 
             "📢 تمام دستورات مدیریتی به پنل دکمه‌ای منتقل شدند.\n\n"
             "روی دکمه <b>📢 مدیریت</b> کلیک کنید.",
             reply_markup=_owner_keyboard())
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ✅ پیام‌های ناشناخته - بهینه‌شده (بدون require_membership)
+    # ✅ پیام‌های ناشناخته
     # ══════════════════════════════════════════════════════════════════════════
     @_bot.message_handler(func=lambda m: True, chat_types=['private'])
     def cmd_unknown(message):
         try:
-            # ✅ فقط حساب را چک کن، نه عضویت (سرعت بیشتر)
             account = _get_account_cached(message.from_user.id)
             if not account: 
                 return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
@@ -808,7 +878,7 @@ def start_token_bot():
             print(f"❌ خطا در cmd_unknown: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # Polling - بهینه‌شده
+    # Polling
     # ══════════════════════════════════════════════════════════════════════════
     def _polling_loop():
         import time as _t
@@ -823,8 +893,10 @@ def start_token_bot():
             except Exception as e:
                 if "409" in str(e):
                     _t.sleep(10)
-                    try: _bot.delete_webhook(drop_pending_updates=True)
-                    except: pass
+                    try: 
+                        _bot.delete_webhook(drop_pending_updates=True)
+                    except: 
+                        pass
                 else:
                     print(f"⚠️ خطای polling: {e}")
                     _t.sleep(3)
@@ -864,6 +936,7 @@ def _finish_lottery(lottery_id, group_chat):
             try:
                 _bot.send_message(winner["user_tg_id"], 
                     f"🎉 تبریک! شما برنده قرعه‌کشی شدید!\n💎 <b>{total_prize} الماس</b> به حساب شما واریز شد.")
-            except: pass
+            except: 
+                pass
     except Exception as e:
         print(f"❌ خطا در پایان قرعه‌کشی: {e}")
