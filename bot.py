@@ -27,9 +27,9 @@ FONTS = {
 _ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 LINK_PATTERN = re.compile(
-    r"(https?://\S+|t\.me/\S+)", re.IGNORECASE
+    r"(https?://\S+|t\.me/\S+|telegram\.me/\S+|www\.\S+)", re.IGNORECASE
 )
-BADWORDS = ["مادرتو گاییدم", "بیناموس", "حرومزاده", "مادرجنده", "خارکصه", "مادرخر", "خارتو گاییدم"]
+BADWORDS = ["فحش", "بد", "کثیف", "احمق", "گاو", "خر", "مرتیکه"]
 
 
 def _convert_font(text, chars):
