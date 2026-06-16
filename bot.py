@@ -873,10 +873,16 @@ def _help_text():
 """
 
 
-# ─── حلقه‌های پس‌زمینه ──────────────────────────────────────────────────────────
+# ─── حلقه‌های پس‌زمینه ──────────────────────────────────────────────────────────# ─── حلقه‌های پس‌زمینه ──────────────────────────────────────────────────────────
 async def _clock_loop(cl, owner_id):
     while True:
         try:
+            # ✅ محاسبه دقیق زمان باقی‌مانده تا شروع دقیقه بعدی (برای حذف تاخیر)
+            now = datetime.datetime.now()
+            seconds_to_next_minute = 60 - now.second
+            await asyncio.sleep(seconds_to_next_minute)
+
+            # به‌روزرسانی بلافاصله پس از تغییر دقیقه
             time_str = persian_time()
             font_id = db.get_setting(owner_id, "selected_font", "0")
             fn = FONTS.get(font_id, FONTS["0"])
@@ -886,6 +892,7 @@ async def _clock_loop(cl, owner_id):
                 await cl(UpdateProfileRequest(last_name=styled_time[:64]))
             if db.get_setting(owner_id, "clock_bio_active") == "1":
                 await cl(UpdateProfileRequest(about=f"⏰ {styled_time}"[:70]))
+                
         except Exception:
             pass
         await asyncio.sleep(60)
