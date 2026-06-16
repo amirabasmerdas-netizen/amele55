@@ -2,10 +2,87 @@
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
   <title>AMEL SELF55 — پنل مدیریت</title>
   <link rel="stylesheet" href="/static/style.css">
   <meta name="theme-color" content="#0a0b14">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    /* بهینه‌سازی برای موبایل */
+    @media (max-width: 768px) {
+      .auth-card { padding: 20px 15px; }
+      .auth-title { font-size: 24px; }
+      .auth-sub { font-size: 13px; }
+      .auth-input { font-size: 16px; padding: 12px; }
+      .auth-btn { font-size: 15px; padding: 12px; }
+      .ph-title { font-size: 20px; }
+      .ph-username { font-size: 13px; }
+      .dc-btn { font-size: 13px; padding: 10px 8px; }
+      .dc-btn-full { font-size: 14px; padding: 12px; }
+      .dc-input { font-size: 15px; padding: 10px; }
+      .guide-cmd { font-size: 13px; }
+      .guide-cmd code { font-size: 12px; }
+      .panel-footer { font-size: 12px; padding: 12px 8px; }
+      .panel-footer a { font-size: 12px; }
+      .toast { font-size: 13px; padding: 10px 16px; max-width: 90vw; }
+      .sb-item { font-size: 14px; padding: 12px 16px; }
+      .sb-brand-name { font-size: 16px; }
+      .sb-brand-sub { font-size: 10px; }
+      .dc-token-big { font-size: 28px; }
+      .dc-token-med { font-size: 20px; }
+      .dc-token-stat { padding: 12px 8px; }
+      table { font-size: 12px; }
+      th, td { padding: 8px 6px; }
+      .btn-pri, .btn-dng { font-size: 13px; padding: 8px 12px; }
+      .input-row { flex-wrap: wrap; gap: 8px; }
+      .input-row input, .input-row button { flex: 1 1 auto; min-width: 120px; }
+    }
+    
+    /* بهبود touch targets */
+    @media (pointer: coarse) {
+      button, .sb-item, .dc-btn, .dc-btn-full, .btn-pri, .btn-dng {
+        min-height: 44px;
+      }
+      .tgl-s { width: 48px; height: 26px; }
+      .tgl-s::before { width: 22px; height: 22px; }
+    }
+    
+    /* فوتر اسپانسرها */
+    .sponsors-footer {
+      text-align: center;
+      margin-top: 16px;
+      padding: 12px;
+      background: rgba(167, 139, 250, 0.08);
+      border-radius: 10px;
+      border: 1px solid rgba(167, 139, 250, 0.2);
+    }
+    .sponsors-footer p {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      color: #c4b5fd;
+    }
+    .sponsors-footer a {
+      color: #22c55e;
+      text-decoration: none;
+      font-weight: 600;
+      margin: 0 6px;
+    }
+    .sponsors-footer a:hover { text-decoration: underline; }
+    
+    /* کارت قیمت توکن */
+    .token-price-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-right: 6px;
+    }
+  </style>
 </head>
 <body>
 
@@ -250,7 +327,7 @@ async function verify2fa() {
         <span class="sb-icon">🔧</span> ابزار
       </a>
       <a class="sb-item" id="nav-spam" onclick="showSection('spam',this)">
-        <span class="sb-icon">📨</span> اسیم
+        <span class="sb-icon">💣</span> اسپم
       </a>
       <a class="sb-item" id="nav-message" onclick="showSection('message',this)">
         <span class="sb-icon">✉️</span> پیام
@@ -437,16 +514,16 @@ async function verify2fa() {
           </div>
         </div>
 
-        <!-- اسیم -->
+        <!-- اسپم -->
         <div class="dash-card">
-          <div class="dc-header"><span class="dc-icon">📨</span> اسیم</div>
+          <div class="dc-header"><span class="dc-icon">💣</span> اسپم</div>
           <div class="dc-body">
             <div class="dc-tool-row">
               <input type="number" id="spamCount" class="dc-input" placeholder="تعداد" min="1" max="100" style="width:90px;flex-shrink:0">
               <input type="text" id="spamText" class="dc-input" placeholder="متن پیام">
               <button class="dc-icon-btn" onclick="startSpam()">✈️</button>
             </div>
-            <button class="dc-btn-full dc-red" onclick="stopSpam()">توقف اسیم ⏹</button>
+            <button class="dc-btn-full dc-red" onclick="stopSpam()">توقف اسپم ⏹</button>
           </div>
         </div>
 
@@ -510,7 +587,9 @@ async function verify2fa() {
             <div class="dc-token-info-bar">
               ⚡ <b id="tkSession">2</b> توکن = <b id="tkHours">2</b> ساعت سلف &nbsp;|&nbsp;
               🎁 <b id="tkDaily">1</b> توکن هدیه روزانه &nbsp;|&nbsp;
-              🔗 <b id="tkRef">50</b> توکن به ازای هر رفرال
+              🔗 <b id="tkRef">12</b> توکن به ازای هر رفرال
+              <br>
+              💰 قیمت هر توکن: <span class="token-price-badge">200 تومان</span>
             </div>
           </div>
         </div>
@@ -674,7 +753,14 @@ async function verify2fa() {
 
     <!-- فوتر -->
     <div class="panel-footer">
-      🌐 AMEL55.COM &nbsp;&nbsp; Design By <span style="color:#c4b5fd">@Amele55</span> ❤️
+      <div class="sponsors-footer">
+        <p>🤝 <b>اسپانسرهای رسمی پروژه:</b></p>
+        <a href="https://t.me/pesar777" target="_blank">@pesar777</a> | 
+        <a href="https://t.me/ISOLODEVIL" target="_blank">@ISOLODEVIL</a>
+      </div>
+      <p style="margin-top:12px;font-size:13px;color:#888">
+        🌐 AMEL55.COM &nbsp;&nbsp; Design By <a href="https://t.me/Amele55" target="_blank" style="color:#c4b5fd;text-decoration:none">@Amele55</a> ❤️
+      </p>
     </div>
   </div>
 </div>
@@ -909,7 +995,6 @@ async function loadTokens() {
     window._botUsername = data.bot_username || "";
     const isActive = data.token_system_active;
 
-    // نمایش/مخفی کردن المان‌های توکن
     const wrap = document.getElementById("phTokensWrap");
     const card = document.getElementById("tokenCard");
     const navTok = document.getElementById("nav-tokens");
@@ -919,7 +1004,6 @@ async function loadTokens() {
 
     if (!isActive) return;
 
-    // آپدیت اعداد
     if (document.getElementById("phTokenBalance")) document.getElementById("phTokenBalance").textContent = data.balance;
     if (document.getElementById("tokenBalance")) document.getElementById("tokenBalance").textContent = data.balance;
     if (document.getElementById("tokenTotal")) document.getElementById("tokenTotal").textContent = data.total_earned;
@@ -929,7 +1013,6 @@ async function loadTokens() {
     if (document.getElementById("tkDaily")) document.getElementById("tkDaily").textContent = data.daily_gift;
     if (document.getElementById("tkRef")) document.getElementById("tkRef").textContent = data.referral_tokens;
 
-    // وضعیت دکمه هدیه روزانه
     const dailyBtn = document.getElementById("dailyBtn");
     if (dailyBtn) {
       dailyBtn.disabled = !data.can_claim_daily;
