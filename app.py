@@ -171,8 +171,22 @@ def api_panel_logout():
 @app.route("/tg-login")
 @login_required
 def tg_login_page():
-    return render_template("panel.html", page="tg_login",
-                           username=db.get_account(owner_id())["username"])
+    oid = owner_id()
+    account = db.get_account(oid)
+    
+    # بررسی وجود حساب کاربری
+    if not account:
+        session.pop("owner_id", None)
+        return redirect(url_for("panel_login_page"))
+        
+    return render_template("panel.html", page="tg_login", username=account["username"])
+    
+    # بررسی وجود حساب کاربری
+    if not account:
+        session.pop("owner_id", None)
+        return redirect(url_for("panel_login_page"))
+        
+    return render_template("panel.html", page="tg_login", username=account["username"])
 
 
 @app.route("/api/login/send_code", methods=["POST"])
