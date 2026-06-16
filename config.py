@@ -25,8 +25,8 @@ WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
 
 TOKENS_PER_SESSION = 2
 SESSION_HOURS = 2
-DAILY_TOKEN_GIFT = 1
-REFERRAL_TOKENS = 50
+DAILY_TOKEN_GIFT = 0.5
+REFERRAL_TOKENS = 12
 WELCOME_TOKENS = 10
 # ... (سایر تنظیمات) ...
 # آیدی کانال یا گروهی که کاربر باید عضو باشد (با @ شروع شود)
