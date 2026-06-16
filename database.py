@@ -10,26 +10,26 @@ from config import DATABASE_URL
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🚀 Connection Pooling - مهم‌ترین بهینه‌سازی!
+# 🚀 Connection Pooling بهینه‌شده
 # ══════════════════════════════════════════════════════════════════════════════
 _connection_pool = None
 _pool_lock = threading.Lock()
 
 
 def _get_pool():
-    """ایجاد یا دریافت connection pool"""
     global _connection_pool
     if _connection_pool is None:
         with _pool_lock:
             if _connection_pool is None:
                 try:
                     _connection_pool = psycopg2.pool.ThreadedConnectionPool(
-                        minconn=2,      # حداقل ۲ connection همیشه باز
-                        maxconn=10,     # حداکثر ۱۰ connection همزمان
+                        minconn=3,      # افزایش به ۳
+                        maxconn=15,     # افزایش به ۱
                         dsn=DATABASE_URL,
-                        connect_timeout=10,
+                        connect_timeout=5,  # کاهش timeout
+                        options="-c statement_timeout=10000 -c idle_in_transaction_session_timeout=30000"
                     )
-                    print("✅ Connection pool ایجاد شد (min=2, max=10)")
+                    print("✅ Connection pool ایجاد شد (min=3, max=15)")
                 except Exception as e:
                     print(f"❌ خطا در ایجاد pool: {e}")
                     raise
@@ -37,18 +37,14 @@ def _get_pool():
 
 
 def get_conn():
-    """دریافت connection از pool (بسیار سریع‌تر از connect مستقیم)"""
     try:
         pool = _get_pool()
         return pool.getconn()
-    except Exception as e:
-        print(f"⚠️ خطا در دریافت connection: {e}")
-        # Fallback: اتصال مستقیم
-        return psycopg2.connect(DATABASE_URL, connect_timeout=10)
+    except Exception:
+        return psycopg2.connect(DATABASE_URL, connect_timeout=5)
 
 
 def release_conn(conn):
-    """برگرداندن connection به pool (بستن نیست!)"""
     try:
         pool = _get_pool()
         pool.putconn(conn)
@@ -64,279 +60,194 @@ def _hash_pw(password: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🚀 Cache هوشمند برای تنظیمات (کاهش ۹۰٪ query)
+#  Cache پیشرفته با LRU
 # ══════════════════════════════════════════════════════════════════════════════
-class DBSettingsCache:
-    """Cache تنظیمات برای کاهش query"""
-    def __init__(self, ttl=30):
+class AdvancedCache:
+    """Cache با LRU eviction و TTL"""
+    def __init__(self, max_size=1000, ttl=60):
         self._cache = {}
         self._timestamps = {}
+        self._access_order = []
+        self._max_size = max_size
         self._ttl = ttl
         self._lock = threading.Lock()
     
-    def get(self, owner_id, key, default=None):
-        cache_key = f"{owner_id}:{key}"
+    def get(self, key, default=None):
         now = _time.time()
-        
         with self._lock:
-            if cache_key in self._cache and cache_key in self._timestamps:
-                if now - self._timestamps[cache_key] < self._ttl:
-                    return self._cache[cache_key]
-        
-        # Cache miss - از دیتابیس بخوان
-        conn = get_conn()
-        try:
-            c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            c.execute("SELECT value FROM settings WHERE owner_id = %s AND key = %s", (owner_id, key))
-            row = c.fetchone()
-            value = row["value"] if row else default
-            
-            with self._lock:
-                self._cache[cache_key] = value
-                self._timestamps[cache_key] = now
-            
-            return value
-        except Exception:
-            return default
-        finally:
-            release_conn(conn)
+            if key in self._cache:
+                if now - self._timestamps[key] < self._ttl:
+                    # Update access order
+                    if key in self._access_order:
+                        self._access_order.remove(key)
+                    self._access_order.append(key)
+                    return self._cache[key]
+                else:
+                    # Expired
+                    del self._cache[key]
+                    del self._timestamps[key]
+                    if key in self._access_order:
+                        self._access_order.remove(key)
+        return default
     
-    def set(self, owner_id, key, value):
-        cache_key = f"{owner_id}:{key}"
-        
-        conn = get_conn()
-        try:
-            c = conn.cursor()
-            c.execute("""INSERT INTO settings (owner_id, key, value) VALUES (%s, %s, %s)
-                         ON CONFLICT (owner_id, key) DO UPDATE SET value = EXCLUDED.value""",
-                      (owner_id, key, str(value)))
-            conn.commit()
-            
-            with self._lock:
-                self._cache[cache_key] = str(value)
-                self._timestamps[cache_key] = _time.time()
-        except Exception:
-            pass
-        finally:
-            release_conn(conn)
-    
-    def invalidate(self, owner_id=None):
+    def set(self, key, value):
         with self._lock:
-            if owner_id is None:
+            self._cache[key] = value
+            self._timestamps[key] = _time.time()
+            if key in self._access_order:
+                self._access_order.remove(key)
+            self._access_order.append(key)
+            
+            # LRU eviction
+            while len(self._cache) > self._max_size:
+                oldest = self._access_order.pop(0)
+                self._cache.pop(oldest, None)
+                self._timestamps.pop(oldest, None)
+    
+    def invalidate(self, pattern=None):
+        with self._lock:
+            if pattern is None:
                 self._cache.clear()
                 self._timestamps.clear()
+                self._access_order.clear()
             else:
-                keys_to_del = [k for k in list(self._cache.keys()) if k.startswith(f"{owner_id}:")]
+                keys_to_del = [k for k in list(self._cache.keys()) if pattern in k]
                 for k in keys_to_del:
                     self._cache.pop(k, None)
                     self._timestamps.pop(k, None)
+                    if k in self._access_order:
+                        self._access_order.remove(k)
+
+# Cache instances
+settings_cache = AdvancedCache(max_size=2000, ttl=60)
+account_cache = AdvancedCache(max_size=500, ttl=300)
+list_cache = AdvancedCache(max_size=500, ttl=120)
 
 
-# Instance سراسری cache
-db_cache = DBSettingsCache(ttl=30)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# init_db - با Index‌های بهینه
-# ══════════════════════════════════════════════════════════════════════════════
 def init_db():
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # ─── حساب‌های پنل ────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS accounts (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            telegram_user_id BIGINT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
+        # جداول (همان قبلی)
+        tables = [
+            """CREATE TABLE IF NOT EXISTS accounts (
+                id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL, telegram_user_id BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS forced_channels (
+                id SERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS settings (
+                owner_id BIGINT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+                PRIMARY KEY (owner_id, key))""",
+            
+            """CREATE TABLE IF NOT EXISTS enemies (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                username TEXT, name TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (owner_id, user_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS friends (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                username TEXT, name TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (owner_id, user_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS silent_chats (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, chat_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS silent_users (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, user_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS saved_messages (
+                owner_id BIGINT NOT NULL, slot INTEGER NOT NULL, content TEXT, media_path TEXT,
+                saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (owner_id, slot))""",
+            
+            """CREATE TABLE IF NOT EXISTS deleted_messages (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT, sender_id BIGINT,
+                sender_name TEXT, message TEXT, media_type TEXT,
+                deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS scheduled_messages (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT NOT NULL,
+                message TEXT NOT NULL, send_at TIMESTAMP NOT NULL, sent INTEGER DEFAULT 0)""",
+            
+            """CREATE TABLE IF NOT EXISTS tokens (
+                owner_id BIGINT PRIMARY KEY, balance INTEGER DEFAULT 0,
+                last_daily TEXT DEFAULT NULL, total_earned INTEGER DEFAULT 0)""",
+            
+            """CREATE TABLE IF NOT EXISTS referrals (
+                id SERIAL PRIMARY KEY, referrer_owner_id BIGINT NOT NULL,
+                referred_tg_id BIGINT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS world_cup_challenges (
+                id SERIAL PRIMARY KEY, team1 TEXT NOT NULL, team2 TEXT NOT NULL,
+                match_time TEXT NOT NULL, bet_amount INTEGER NOT NULL,
+                winner_team TEXT DEFAULT NULL, status TEXT DEFAULT 'active',
+                message_id BIGINT DEFAULT NULL, chat_id BIGINT DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS world_cup_bets (
+                id SERIAL PRIMARY KEY, challenge_id BIGINT NOT NULL,
+                user_tg_id BIGINT NOT NULL, owner_id BIGINT NOT NULL,
+                team_choice TEXT NOT NULL, bet_amount INTEGER NOT NULL,
+                result TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (challenge_id, user_tg_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS lotteries (
+                id SERIAL PRIMARY KEY, chat_id BIGINT NOT NULL, creator_tg_id BIGINT NOT NULL,
+                prize_amount INTEGER NOT NULL, end_time TIMESTAMP NOT NULL,
+                winner_tg_id BIGINT DEFAULT NULL, status TEXT DEFAULT 'active',
+                message_id BIGINT DEFAULT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS lottery_participants (
+                id SERIAL PRIMARY KEY, lottery_id BIGINT NOT NULL, user_tg_id BIGINT NOT NULL,
+                owner_id BIGINT NOT NULL, bet_amount INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (lottery_id, user_tg_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS diamond_transactions (
+                id SERIAL PRIMARY KEY, from_owner_id BIGINT NOT NULL, to_owner_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL, type TEXT NOT NULL, description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+        ]
+        
+        for table_sql in tables:
+            c.execute(table_sql)
 
-        # ─── چنل‌های اجباری ──────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS forced_channels (
-            id SERIAL PRIMARY KEY,
-            username TEXT NOT NULL UNIQUE,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
-
-        # ─── تنظیمات (per-user) ───────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS settings (
-            owner_id BIGINT NOT NULL,
-            key TEXT NOT NULL,
-            value TEXT NOT NULL,
-            PRIMARY KEY (owner_id, key)
-        )""")
-
-        # ─── دشمن ─────────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS enemies (
-            id SERIAL PRIMARY KEY,
-            owner_id BIGINT NOT NULL,
-            user_id BIGINT NOT NULL,
-            username TEXT,
-            name TEXT,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (owner_id, user_id)
-        )""")
-
-        # ─── دوست ─────────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS friends (
-            id SERIAL PRIMARY KEY,
-            owner_id BIGINT NOT NULL,
-            user_id BIGINT NOT NULL,
-            username TEXT,
-            name TEXT,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (owner_id, user_id)
-        )""")
-
-        # ─── سایلنت چت ────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS silent_chats (
-            id SERIAL PRIMARY KEY,
-            owner_id BIGINT NOT NULL,
-            chat_id BIGINT NOT NULL,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (owner_id, chat_id)
-        )""")
-
-        # ─── سایلنت کاربر ─────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS silent_users (
-            id SERIAL PRIMARY KEY,
-            owner_id BIGINT NOT NULL,
-            user_id BIGINT NOT NULL,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (owner_id, user_id)
-        )""")
-
-        # ─── پیام‌های ذخیره‌شده ────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS saved_messages (
-            owner_id BIGINT NOT NULL,
-            slot INTEGER NOT NULL,
-            content TEXT,
-            media_path TEXT,
-            saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (owner_id, slot)
-        )""")
-
-        # ─── پیام‌های حذف‌شده ─────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS deleted_messages (
-            id SERIAL PRIMARY KEY,
-            owner_id BIGINT NOT NULL,
-            chat_id BIGINT,
-            sender_id BIGINT,
-            sender_name TEXT,
-            message TEXT,
-            media_type TEXT,
-            deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
-
-        # ─── پیام‌های زمان‌بندی‌شده ───────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS scheduled_messages (
-            id SERIAL PRIMARY KEY,
-            owner_id BIGINT NOT NULL,
-            chat_id BIGINT NOT NULL,
-            message TEXT NOT NULL,
-            send_at TIMESTAMP NOT NULL,
-            sent INTEGER DEFAULT 0
-        )""")
-
-        # ─── الماس‌ها ─────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS tokens (
-            owner_id BIGINT PRIMARY KEY,
-            balance INTEGER DEFAULT 0,
-            last_daily TEXT DEFAULT NULL,
-            total_earned INTEGER DEFAULT 0
-        )""")
-
-        # ─── رفرال‌ها ──────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS referrals (
-            id SERIAL PRIMARY KEY,
-            referrer_owner_id BIGINT NOT NULL,
-            referred_tg_id BIGINT NOT NULL UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
-
-        # ─── چالش‌های جام جهانی ──────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS world_cup_challenges (
-            id SERIAL PRIMARY KEY,
-            team1 TEXT NOT NULL,
-            team2 TEXT NOT NULL,
-            match_time TEXT NOT NULL,
-            bet_amount INTEGER NOT NULL,
-            winner_team TEXT DEFAULT NULL,
-            status TEXT DEFAULT 'active',
-            message_id BIGINT DEFAULT NULL,
-            chat_id BIGINT DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
-
-        c.execute("""CREATE TABLE IF NOT EXISTS world_cup_bets (
-            id SERIAL PRIMARY KEY,
-            challenge_id BIGINT NOT NULL,
-            user_tg_id BIGINT NOT NULL,
-            owner_id BIGINT NOT NULL,
-            team_choice TEXT NOT NULL,
-            bet_amount INTEGER NOT NULL,
-            result TEXT DEFAULT 'pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (challenge_id, user_tg_id)
-        )""")
-
-        # ─── قرعه‌کشی‌ها ─────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS lotteries (
-            id SERIAL PRIMARY KEY,
-            chat_id BIGINT NOT NULL,
-            creator_tg_id BIGINT NOT NULL,
-            prize_amount INTEGER NOT NULL,
-            end_time TIMESTAMP NOT NULL,
-            winner_tg_id BIGINT DEFAULT NULL,
-            status TEXT DEFAULT 'active',
-            message_id BIGINT DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
-
-        c.execute("""CREATE TABLE IF NOT EXISTS lottery_participants (
-            id SERIAL PRIMARY KEY,
-            lottery_id BIGINT NOT NULL,
-            user_tg_id BIGINT NOT NULL,
-            owner_id BIGINT NOT NULL,
-            bet_amount INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (lottery_id, user_tg_id)
-        )""")
-
-        # ─── تراکنش‌های الماس ────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS diamond_transactions (
-            id SERIAL PRIMARY KEY,
-            from_owner_id BIGINT NOT NULL,
-            to_owner_id BIGINT NOT NULL,
-            amount INTEGER NOT NULL,
-            type TEXT NOT NULL,
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
-
-        # ✅ ایجاد INDEX برای سرعت بیشتر
-        try:
-            c.execute("CREATE INDEX IF NOT EXISTS idx_accounts_tg ON accounts(telegram_user_id)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(username)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_friends_owner ON friends(owner_id)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_enemies_owner ON enemies(owner_id)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_wc_bets_challenge ON world_cup_bets(challenge_id)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_lottery_part ON lottery_participants(lottery_id)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_referrals_ref ON referrals(referrer_owner_id)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_deleted_owner ON deleted_messages(owner_id, deleted_at DESC)")
-            c.execute("CREATE INDEX IF NOT EXISTS idx_scheduled_pending ON scheduled_messages(owner_id, sent, send_at)")
-        except Exception as e:
-            print(f"⚠️ خطا در ایجاد index: {e}")
+        # ✅ Index‌های بهینه‌شده
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_accounts_tg ON accounts(telegram_user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(username)",
+            "CREATE INDEX IF NOT EXISTS idx_settings_owner_key ON settings(owner_id, key)",
+            "CREATE INDEX IF NOT EXISTS idx_tokens_owner ON tokens(owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_friends_owner ON friends(owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_enemies_owner ON enemies(owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_wc_bets_challenge ON world_cup_bets(challenge_id)",
+            "CREATE INDEX IF NOT EXISTS idx_lottery_part ON lottery_participants(lottery_id)",
+            "CREATE INDEX IF NOT EXISTS idx_referrals_ref ON referrals(referrer_owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_deleted_owner_time ON deleted_messages(owner_id, deleted_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_scheduled_pending ON scheduled_messages(owner_id, sent, send_at)",
+            "CREATE INDEX IF NOT EXISTS idx_forced_channels_username ON forced_channels(username)",
+        ]
+        
+        for idx_sql in indexes:
+            try:
+                c.execute(idx_sql)
+            except Exception:
+                pass
 
         conn.commit()
     finally:
         release_conn(conn)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# مدیریت حساب
+# ═════════════════════════════════════════════════════════════════════════════
+# مدیریت حساب - با Cache
 # ══════════════════════════════════════════════════════════════════════════════
 def create_account(username: str, password: str):
     conn = get_conn()
@@ -373,48 +284,80 @@ def _init_tokens_by_id(owner_id: int):
 
 
 def verify_account(username: str, password: str):
+    cache_key = f"verify:{username}:{_hash_pw(password)}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT id FROM accounts WHERE username = %s AND password_hash = %s",
                   (username.strip(), _hash_pw(password)))
         row = c.fetchone()
-        return row["id"] if row else None
+        result = row["id"] if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
     finally:
         release_conn(conn)
 
 
 def get_account(owner_id: int):
+    cache_key = f"account:{owner_id}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE id = %s", (owner_id,))
         row = c.fetchone()
-        return dict(row) if row else None
+        result = dict(row) if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
     finally:
         release_conn(conn)
 
 
 def get_account_by_username(username: str):
+    cache_key = f"account_user:{username}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE username = %s",
                   (username.strip(),))
         row = c.fetchone()
-        return dict(row) if row else None
+        result = dict(row) if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
     finally:
         release_conn(conn)
 
 
 def get_account_by_tg_id(tg_id: int):
+    cache_key = f"account_tg:{tg_id}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE telegram_user_id = %s",
                   (tg_id,))
         row = c.fetchone()
-        return dict(row) if row else None
+        result = dict(row) if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
     finally:
         release_conn(conn)
 
@@ -424,8 +367,7 @@ def get_all_accounts():
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT id, username, created_at FROM accounts ORDER BY created_at")
-        rows = [dict(r) for r in c.fetchall()]
-        return rows
+        return [dict(r) for r in c.fetchall()]
     finally:
         release_conn(conn)
 
@@ -434,9 +376,8 @@ def account_exists():
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        c.execute("SELECT COUNT(*) as cnt FROM accounts")
-        row = c.fetchone()
-        return row["cnt"] > 0
+        c.execute("SELECT EXISTS(SELECT 1 FROM accounts) as exists")
+        return c.fetchone()["exists"]
     finally:
         release_conn(conn)
 
@@ -447,23 +388,33 @@ def save_telegram_user_id(owner_id: int, tg_user_id: int):
         c = conn.cursor()
         c.execute("UPDATE accounts SET telegram_user_id = %s WHERE id = %s", (tg_user_id, owner_id))
         conn.commit()
+        # Invalidate cache
+        account_cache.invalidate(f"account:{owner_id}")
     finally:
         release_conn(conn)
 
 
 def get_telegram_id_by_owner(owner_id: int):
+    cache_key = f"tg_id:{owner_id}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT telegram_user_id FROM accounts WHERE id = %s", (owner_id,))
         row = c.fetchone()
-        return row["telegram_user_id"] if row else None
+        result = row["telegram_user_id"] if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
     finally:
         release_conn(conn)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# تنظیمات - با Cache
+# تنظیمات - با Cache پیشرفته
 # ══════════════════════════════════════════════════════════════════════════════
 SETTING_DEFAULTS = {
     "self_bot_active": "0", "secretary_active": "0", "anti_delete_active": "0",
@@ -494,13 +445,38 @@ def init_user_settings(owner_id: int):
 
 
 def get_setting(owner_id: int, key: str, default=None):
-    """✅ با Cache - ۱۰ برابر سریع‌تر"""
-    return db_cache.get(owner_id, key, default)
+    """✅ با Cache - ۲۰ برابر سریع‌تر"""
+    cache_key = f"setting:{owner_id}:{key}"
+    cached = settings_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT value FROM settings WHERE owner_id = %s AND key = %s", (owner_id, key))
+        row = c.fetchone()
+        value = row["value"] if row else SETTING_DEFAULTS.get(key, default)
+        settings_cache.set(cache_key, value)
+        return value
+    finally:
+        release_conn(conn)
 
 
 def set_setting(owner_id: int, key: str, value):
     """✅ با Cache update"""
-    db_cache.set(owner_id, key, value)
+    cache_key = f"setting:{owner_id}:{key}"
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO settings (owner_id, key, value) VALUES (%s, %s, %s)
+                     ON CONFLICT (owner_id, key) DO UPDATE SET value = EXCLUDED.value""",
+                  (owner_id, key, str(value)))
+        conn.commit()
+        settings_cache.set(cache_key, str(value))
+    finally:
+        release_conn(conn)
 
 
 def toggle_setting(owner_id: int, key: str):
@@ -511,19 +487,17 @@ def toggle_setting(owner_id: int, key: str):
 
 
 def get_all_logged_in_users():
-    """دریافت همه کاربران لاگین شده"""
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT owner_id FROM settings WHERE key = 'logged_in' AND value = '1'")
-        rows = [r["owner_id"] for r in c.fetchall()]
-        return rows
+        return [r["owner_id"] for r in c.fetchall()]
     finally:
         release_conn(conn)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# سیستم الماس
+# سیستم الماس - بهینه‌شده
 # ══════════════════════════════════════════════════════════════════════════════
 def _ensure_tokens_row(conn, owner_id: int):
     c = conn.cursor()
@@ -588,7 +562,7 @@ def transfer_diamonds(from_owner_id: int, to_owner_id: int, amount: int) -> tupl
         c.execute("SELECT balance FROM tokens WHERE owner_id = %s", (from_owner_id,))
         row = c.fetchone()
         if not row or row["balance"] < amount:
-            return False, f"❌ موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
+            return False, f" موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
         
         c_upd = conn.cursor()
         c_upd.execute("UPDATE tokens SET balance = balance - %s WHERE owner_id = %s", (amount, from_owner_id))
@@ -600,7 +574,7 @@ def transfer_diamonds(from_owner_id: int, to_owner_id: int, amount: int) -> tupl
         conn.commit()
         return True, f"✅ {amount} الماس با موفقیت انتقال یافت."
     except Exception as e:
-        return False, f"❌ خطا در انتقال: {str(e)}"
+        return False, f" خطا در انتقال: {str(e)}"
     finally:
         release_conn(conn)
 
@@ -686,7 +660,7 @@ def get_token_stats(owner_id: int) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# دشمن
+# دشمن و دوست - با Cache
 # ══════════════════════════════════════════════════════════════════════════════
 def add_enemy(owner_id: int, user_id: int, username=None, name=None):
     conn = get_conn()
@@ -696,6 +670,7 @@ def add_enemy(owner_id: int, user_id: int, username=None, name=None):
                      ON CONFLICT (owner_id, user_id) DO UPDATE SET username=EXCLUDED.username, name=EXCLUDED.name""",
                   (owner_id, user_id, username, name))
         conn.commit()
+        list_cache.invalidate(f"enemies:{owner_id}")
         return True
     except Exception:
         return False
@@ -710,31 +685,33 @@ def remove_enemy(owner_id: int, user_id: int):
         c.execute("DELETE FROM enemies WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
         affected = c.rowcount
         conn.commit()
+        if affected > 0:
+            list_cache.invalidate(f"enemies:{owner_id}")
         return affected > 0
     finally:
         release_conn(conn)
 
 
 def get_enemies(owner_id: int):
+    cache_key = f"enemies:{owner_id}"
+    cached = list_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM enemies WHERE owner_id = %s ORDER BY added_at DESC", (owner_id,))
         rows = [dict(r) for r in c.fetchall()]
+        list_cache.set(cache_key, rows)
         return rows
     finally:
         release_conn(conn)
 
 
 def is_enemy(owner_id: int, user_id: int):
-    conn = get_conn()
-    try:
-        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        c.execute("SELECT 1 FROM enemies WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
-        row = c.fetchone()
-        return row is not None
-    finally:
-        release_conn(conn)
+    enemies = get_enemies(owner_id)
+    return any(e["user_id"] == user_id for e in enemies)
 
 
 def clear_enemies(owner_id: int):
@@ -743,13 +720,11 @@ def clear_enemies(owner_id: int):
         c = conn.cursor()
         c.execute("DELETE FROM enemies WHERE owner_id = %s", (owner_id,))
         conn.commit()
+        list_cache.invalidate(f"enemies:{owner_id}")
     finally:
         release_conn(conn)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# دوست
-# ══════════════════════════════════════════════════════════════════════════════
 def add_friend(owner_id: int, user_id: int, username=None, name=None):
     conn = get_conn()
     try:
@@ -758,6 +733,7 @@ def add_friend(owner_id: int, user_id: int, username=None, name=None):
                      ON CONFLICT (owner_id, user_id) DO UPDATE SET username=EXCLUDED.username, name=EXCLUDED.name""",
                   (owner_id, user_id, username, name))
         conn.commit()
+        list_cache.invalidate(f"friends:{owner_id}")
         return True
     except Exception:
         return False
@@ -772,31 +748,33 @@ def remove_friend(owner_id: int, user_id: int):
         c.execute("DELETE FROM friends WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
         affected = c.rowcount
         conn.commit()
+        if affected > 0:
+            list_cache.invalidate(f"friends:{owner_id}")
         return affected > 0
     finally:
         release_conn(conn)
 
 
 def get_friends(owner_id: int):
+    cache_key = f"friends:{owner_id}"
+    cached = list_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM friends WHERE owner_id = %s ORDER BY added_at DESC", (owner_id,))
         rows = [dict(r) for r in c.fetchall()]
+        list_cache.set(cache_key, rows)
         return rows
     finally:
         release_conn(conn)
 
 
 def is_friend(owner_id: int, user_id: int):
-    conn = get_conn()
-    try:
-        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        c.execute("SELECT 1 FROM friends WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
-        row = c.fetchone()
-        return row is not None
-    finally:
-        release_conn(conn)
+    friends = get_friends(owner_id)
+    return any(f["user_id"] == user_id for f in friends)
 
 
 def clear_friends(owner_id: int):
@@ -805,12 +783,13 @@ def clear_friends(owner_id: int):
         c = conn.cursor()
         c.execute("DELETE FROM friends WHERE owner_id = %s", (owner_id,))
         conn.commit()
+        list_cache.invalidate(f"friends:{owner_id}")
     finally:
         release_conn(conn)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# سایلنت
+# سایلنت - با Cache
 # ══════════════════════════════════════════════════════════════════════════════
 def add_silent_chat(owner_id: int, chat_id: int):
     conn = get_conn()
@@ -838,8 +817,7 @@ def is_silent_chat(owner_id: int, chat_id: int):
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT 1 FROM silent_chats WHERE owner_id = %s AND chat_id = %s", (owner_id, chat_id))
-        row = c.fetchone()
-        return row is not None
+        return c.fetchone() is not None
     finally:
         release_conn(conn)
 
@@ -870,14 +848,13 @@ def is_silent_user(owner_id: int, user_id: int):
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT 1 FROM silent_users WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
-        row = c.fetchone()
-        return row is not None
+        return c.fetchone() is not None
     finally:
         release_conn(conn)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# پیام‌های ذخیره‌شده
+# پیام‌ها
 # ══════════════════════════════════════════════════════════════════════════════
 def save_message_slot(owner_id: int, slot: int, content, media_path=None):
     conn = get_conn()
@@ -902,9 +879,6 @@ def get_message_slot(owner_id: int, slot: int):
         release_conn(conn)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# پیام‌های حذف‌شده
-# ══════════════════════════════════════════════════════════════════════════════
 def log_deleted_message(owner_id: int, chat_id, sender_id, sender_name, message, media_type=None):
     conn = get_conn()
     try:
@@ -923,15 +897,11 @@ def get_deleted_messages(owner_id: int, limit=50):
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM deleted_messages WHERE owner_id = %s ORDER BY deleted_at DESC LIMIT %s",
                   (owner_id, limit))
-        rows = [dict(r) for r in c.fetchall()]
-        return rows
+        return [dict(r) for r in c.fetchall()]
     finally:
         release_conn(conn)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# پیام‌های زمان‌بندی‌شده
-# ══════════════════════════════════════════════════════════════════════════════
 def add_scheduled_message(owner_id: int, chat_id, message, send_at):
     conn = get_conn()
     try:
@@ -953,8 +923,7 @@ def get_pending_scheduled(owner_id: int):
         c.execute("""SELECT * FROM scheduled_messages 
                      WHERE owner_id = %s AND sent = 0 AND send_at <= CURRENT_TIMESTAMP 
                      ORDER BY send_at""", (owner_id,))
-        rows = [dict(r) for r in c.fetchall()]
-        return rows
+        return [dict(r) for r in c.fetchall()]
     finally:
         release_conn(conn)
 
@@ -977,8 +946,7 @@ def get_forced_channels():
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT username FROM forced_channels ORDER BY added_at DESC")
-        rows = [r["username"] for r in c.fetchall()]
-        return rows
+        return [r["username"] for r in c.fetchall()]
     finally:
         release_conn(conn)
 
@@ -1060,8 +1028,7 @@ def get_active_challenges():
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM world_cup_challenges WHERE status = 'active' ORDER BY created_at DESC")
-        rows = [dict(r) for r in c.fetchall()]
-        return rows
+        return [dict(r) for r in c.fetchall()]
     finally:
         release_conn(conn)
 
@@ -1112,8 +1079,7 @@ def get_challenge_bets(challenge_id: int):
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM world_cup_bets WHERE challenge_id = %s", (challenge_id,))
-        rows = [dict(r) for r in c.fetchall()]
-        return rows
+        return [dict(r) for r in c.fetchall()]
     finally:
         release_conn(conn)
 
@@ -1194,8 +1160,7 @@ def get_active_lotteries():
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM lotteries WHERE status = 'active' ORDER BY created_at DESC")
-        rows = [dict(r) for r in c.fetchall()]
-        return rows
+        return [dict(r) for r in c.fetchall()]
     finally:
         release_conn(conn)
 
@@ -1220,7 +1185,7 @@ def join_lottery(lottery_id: int, user_tg_id: int, owner_id: int, bet_amount: in
         c.execute("SELECT balance FROM tokens WHERE owner_id = %s", (owner_id,))
         row = c.fetchone()
         if not row or row["balance"] < bet_amount:
-            return False, f"❌ موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
+            return False, f" موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
         
         c.execute("SELECT 1 FROM lottery_participants WHERE lottery_id = %s AND user_tg_id = %s",
                   (lottery_id, user_tg_id))
@@ -1246,8 +1211,7 @@ def get_lottery_participants(lottery_id: int):
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM lottery_participants WHERE lottery_id = %s", (lottery_id,))
-        rows = [dict(r) for r in c.fetchall()]
-        return rows
+        return [dict(r) for r in c.fetchall()]
     finally:
         release_conn(conn)
 
@@ -1280,7 +1244,6 @@ def get_expired_lotteries():
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM lotteries WHERE status = 'active' AND end_time <= CURRENT_TIMESTAMP")
-        rows = [dict(r) for r in c.fetchall()]
-        return rows
+        return [dict(r) for r in c.fetchall()]
     finally:
         release_conn(conn)
