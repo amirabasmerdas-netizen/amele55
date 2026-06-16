@@ -1,1127 +1,498 @@
-/* ─── AMEL SELF55 — Modern Persian Dark UI ─── */
-
-@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&display=swap');
-
-:root {
-  --bg-base: #0d0f14;
-  --bg-surface: #161920;
-  --bg-card: #1e2230;
-  --bg-card-hover: #252a3a;
-  --accent: #6c63ff;
-  --accent-light: #8b85ff;
-  --accent-glow: rgba(108, 99, 255, 0.25);
-  --green: #22c55e;
-  --red: #ef4444;
-  --yellow: #f59e0b;
-  --blue: #3b82f6;
-  --text-primary: #f0f2f8;
-  --text-secondary: #8b91a8;
-  --text-muted: #4a5168;
-  --border: #252a3a;
-  --border-light: #2e3449;
-  --radius: 14px;
-  --radius-sm: 8px;
-  --shadow: 0 4px 24px rgba(0,0,0,0.4);
-  --shadow-glow: 0 0 30px rgba(108,99,255,0.15);
-}
-
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-html { font-size: 16px; scroll-behavior: smooth; }
-
-body {
-  font-family: 'Vazirmatn', Tahoma, Arial, sans-serif;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  direction: rtl;
-  min-height: 100vh;
-  line-height: 1.6;
-}
-
-/* ─── اسکرول‌بار ─── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg-base); }
-::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
-
-/* ─── لایه‌بندی ─── */
-.app-wrapper {
-  display: flex;
-  min-height: 100vh;
-}
-
-/* ─── سایدبار ─── */
-.sidebar {
-  width: 260px;
-  background: var(--bg-surface);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  position: fixed;
-  top: 0; right: 0; bottom: 0;
-  z-index: 100;
-  transition: transform 0.3s ease;
-}
-
-.sidebar-brand {
-  padding: 24px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.brand-logo {
-  width: 42px; height: 42px;
-  background: linear-gradient(135deg, var(--accent), #a855f7);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  box-shadow: 0 0 20px var(--accent-glow);
-  flex-shrink: 0;
-}
-
-.brand-name {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 0.5px;
-}
-
-.brand-version {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.sidebar-nav {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 0;
-}
-
-.nav-section {
-  padding: 4px 16px 2px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-top: 8px;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 20px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 500;
-  border-radius: 0;
-  transition: all 0.2s;
-  border-right: 3px solid transparent;
-  text-decoration: none;
-}
-
-.nav-item:hover {
-  background: var(--bg-card);
-  color: var(--text-primary);
-}
-
-.nav-item.active {
-  background: rgba(108,99,255,0.12);
-  color: var(--accent-light);
-  border-right-color: var(--accent);
-}
-
-.nav-icon { font-size: 16px; width: 20px; text-align: center; }
-
-.sidebar-footer {
-  padding: 16px 20px;
-  border-top: 1px solid var(--border);
-}
-
-.logout-btn {
-  width: 100%;
-  padding: 10px;
-  background: rgba(239,68,68,0.1);
-  border: 1px solid rgba(239,68,68,0.2);
-  color: var(--red);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.logout-btn:hover {
-  background: rgba(239,68,68,0.2);
-  border-color: var(--red);
-}
-
-/* ─── محتوا ─── */
-.main-content {
-  flex: 1;
-  margin-right: 260px;
-  padding: 32px;
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-.page-header {
-  margin-bottom: 28px;
-}
-
-.page-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.page-subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
-/* ─── کارت ─── */
-.card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  margin-bottom: 20px;
-  box-shadow: var(--shadow);
-  transition: border-color 0.2s;
-}
-
-.card:hover { border-color: var(--border-light); }
-
-.card-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* ─── گرید قابلیت‌ها ─── */
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
-}
-
-.feature-item {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  transition: all 0.2s;
-}
-
-.feature-item:hover {
-  border-color: var(--border-light);
-  background: var(--bg-card-hover);
-}
-
-.feature-info { display: flex; align-items: center; gap: 10px; }
-.feature-icon { font-size: 20px; }
-.feature-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
-
-/* ─── سوئیچ تاگل ─── */
-.toggle-switch {
-  position: relative;
-  width: 44px;
-  height: 24px;
-  flex-shrink: 0;
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  position: absolute;
-}
-
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: var(--bg-base);
-  border: 1px solid var(--border-light);
-  border-radius: 24px;
-  transition: all 0.3s;
-}
-
-.toggle-slider::before {
-  content: "";
-  position: absolute;
-  height: 16px; width: 16px;
-  right: 3px; bottom: 3px;
-  background: var(--text-muted);
-  border-radius: 50%;
-  transition: all 0.3s;
-}
-
-.toggle-switch input:checked + .toggle-slider {
-  background: var(--accent);
-  border-color: var(--accent);
-  box-shadow: 0 0 12px var(--accent-glow);
-}
-
-.toggle-switch input:checked + .toggle-slider::before {
-  background: #fff;
-  right: auto;
-  left: 3px;
-}
-
-/* ─── وضعیت بات ─── */
-.status-banner {
-  background: linear-gradient(135deg, var(--bg-card), var(--bg-surface));
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  position: relative;
-  overflow: hidden;
-}
-
-.status-banner::before {
-  content: "";
-  position: absolute;
-  top: 0; right: 0;
-  width: 200px; height: 200px;
-  background: radial-gradient(circle, var(--accent-glow), transparent 70%);
-  pointer-events: none;
-}
-
-.status-left { display: flex; align-items: center; gap: 16px; }
-
-.status-indicator {
-  width: 12px; height: 12px;
-  border-radius: 50%;
-  background: var(--red);
-  box-shadow: 0 0 10px var(--red);
-  transition: all 0.3s;
-  animation: pulse-red 2s infinite;
-}
-
-.status-indicator.online {
-  background: var(--green);
-  box-shadow: 0 0 10px var(--green);
-  animation: pulse-green 2s infinite;
-}
-
-@keyframes pulse-red {
-  0%, 100% { box-shadow: 0 0 10px var(--red); }
-  50% { box-shadow: 0 0 20px var(--red), 0 0 30px var(--red); }
-}
-
-@keyframes pulse-green {
-  0%, 100% { box-shadow: 0 0 10px var(--green); }
-  50% { box-shadow: 0 0 20px var(--green), 0 0 30px var(--green); }
-}
-
-.status-text h3 { font-size: 18px; font-weight: 700; }
-.status-text p { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
-
-.master-toggle-btn {
-  padding: 12px 28px;
-  border-radius: 10px;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 600;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.master-toggle-btn.start {
-  background: linear-gradient(135deg, var(--green), #16a34a);
-  color: #fff;
-  box-shadow: 0 4px 20px rgba(34,197,94,0.3);
-}
-
-.master-toggle-btn.stop {
-  background: linear-gradient(135deg, var(--red), #dc2626);
-  color: #fff;
-  box-shadow: 0 4px 20px rgba(239,68,68,0.3);
-}
-
-.master-toggle-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
-.master-toggle-btn:active { transform: translateY(0); }
-
-/* ─── آمار ─── */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 14px;
-  margin-bottom: 24px;
-}
-
-.stat-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px 20px;
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--accent-light);
-}
-
-.stat-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
-/* ─── جدول ─── */
-.table-container {
-  overflow-x: auto;
-  border-radius: var(--radius-sm);
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-th {
-  padding: 12px 16px;
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-weight: 600;
-  font-size: 12px;
-  text-align: right;
-  border-bottom: 1px solid var(--border);
-}
-
-td {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-primary);
-}
-
-tr:last-child td { border-bottom: none; }
-tr:hover td { background: var(--bg-surface); }
-
-/* ─── دکمه‌ها ─── */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 9px 18px;
-  border-radius: var(--radius-sm);
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  transition: all 0.2s;
-  text-decoration: none;
-}
-
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent-light); transform: translateY(-1px); }
-.btn-danger { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
-.btn-danger:hover { background: rgba(239,68,68,0.25); }
-.btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
-.btn-ghost:hover { background: var(--bg-card); color: var(--text-primary); }
-
-.btn-sm { padding: 6px 12px; font-size: 12px; }
-
-/* ─── فرم ─── */
-.form-group { margin-bottom: 16px; }
-
-label {
-  display: block;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-input[type="text"],
-input[type="number"],
-input[type="password"],
-input[type="tel"],
-textarea,
-select {
-  width: 100%;
-  padding: 11px 14px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.2s;
-  direction: rtl;
-}
-
-input:focus, textarea:focus, select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
-}
-
-textarea { resize: vertical; min-height: 80px; }
-
-select { cursor: pointer; }
-
-/* ─── بج ─── */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 10px;
-  border-radius: 100px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.badge-green { background: rgba(34,197,94,0.15); color: var(--green); }
-.badge-red { background: rgba(239,68,68,0.15); color: var(--red); }
-.badge-blue { background: rgba(59,130,246,0.15); color: var(--blue); }
-
-/* ─── صفحه لاگین ─── */
-.login-wrapper {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-base);
-  padding: 20px;
-}
-
-.login-card {
-  width: 100%;
-  max-width: 420px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 40px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.5), var(--shadow-glow);
-}
-
-.login-logo {
-  text-align: center;
-  margin-bottom: 32px;
-}
-
-.login-logo .icon {
-  width: 64px; height: 64px;
-  background: linear-gradient(135deg, var(--accent), #a855f7);
-  border-radius: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  margin: 0 auto 12px;
-  box-shadow: 0 8px 32px var(--accent-glow);
-}
-
-.login-logo h1 { font-size: 22px; font-weight: 700; }
-.login-logo p { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
-
-.login-steps { display: flex; flex-direction: column; gap: 12px; }
-
-.step { display: none; }
-.step.active { display: block; }
-
-.step-title {
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 16px;
-  color: var(--text-primary);
-}
-
-.login-btn {
-  width: 100%;
-  padding: 13px;
-  background: linear-gradient(135deg, var(--accent), #a855f7);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  margin-top: 4px;
-}
-
-.login-btn:hover { transform: translateY(-1px); filter: brightness(1.1); box-shadow: 0 8px 24px var(--accent-glow); }
-.login-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-
-.error-msg {
-  background: rgba(239,68,68,0.1);
-  border: 1px solid rgba(239,68,68,0.2);
-  color: var(--red);
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  margin-top: 10px;
-  display: none;
-}
-
-.success-msg {
-  background: rgba(34,197,94,0.1);
-  border: 1px solid rgba(34,197,94,0.2);
-  color: var(--green);
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  margin-top: 10px;
-  display: none;
-}
-
-/* ─── تب‌ها ─── */
-.tabs {
-  display: flex;
-  gap: 4px;
-  background: var(--bg-surface);
-  border-radius: var(--radius-sm);
-  padding: 4px;
-  margin-bottom: 20px;
-  border: 1px solid var(--border);
-}
-
-.tab {
-  flex: 1;
-  text-align: center;
-  padding: 9px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  transition: all 0.2s;
-  border: none;
-  background: transparent;
-  font-family: inherit;
-}
-
-.tab.active {
-  background: var(--bg-card);
-  color: var(--accent-light);
-  box-shadow: 0 1px 6px rgba(0,0,0,0.3);
-}
-
-.tab-content { display: none; }
-.tab-content.active { display: block; }
-
-/* ─── توست ─── */
-.toast-container {
-  position: fixed;
-  bottom: 24px;
-  left: 24px;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.toast {
-  padding: 12px 20px;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-weight: 500;
-  color: #fff;
-  box-shadow: var(--shadow);
-  animation: slide-in 0.3s ease;
-  max-width: 300px;
-}
-
-.toast-success { background: #16a34a; }
-.toast-error { background: #dc2626; }
-.toast-info { background: var(--accent); }
-
-@keyframes slide-in {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* ─── رسپانسیو ─── */
-@media (max-width: 768px) {
-  .sidebar { width: 100%; height: auto; position: relative; top: auto; right: auto; bottom: auto; }
-  .main-content { margin-right: 0; padding: 16px; }
-  .app-wrapper { flex-direction: column; }
-  .sidebar { display: none; }
-  .sidebar.open { display: flex; position: fixed; top: 0; right: 0; bottom: 0; width: 260px; z-index: 200; }
-  .mobile-header {
-    display: flex !important;
-    position: sticky;
-    top: 0;
-    z-index: 99;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    padding: 12px 16px;
-    align-items: center;
-    gap: 12px;
-  }
-  .hamburger-btn {
-    background: none;
-    border: none;
-    color: var(--text-primary);
-    font-size: 22px;
-    cursor: pointer;
-  }
-  .features-grid { grid-template-columns: 1fr 1fr; }
-  .stats-row { grid-template-columns: 1fr 1fr; }
-}
-
-.mobile-header { display: none; }
-.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 150; }
-.overlay.open { display: block; }
-
-/* ─── لودینگ ─── */
-.spinner {
-  display: inline-block;
-  width: 18px; height: 18px;
-  border: 2px solid rgba(255,255,255,0.3);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-  vertical-align: middle;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ─── کد پنل ─── */
-.code-block {
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px 16px;
-  font-family: monospace;
-  font-size: 13px;
-  color: var(--accent-light);
-  direction: ltr;
-  overflow-x: auto;
-}
-
-/* ─── خلاصه دستورات ─── */
-.commands-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px;
-}
-
-.command-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-}
-
-.command-card h4 {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent-light);
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.command-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.cmd {
-  font-size: 12px;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.cmd code {
-  background: var(--bg-card);
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-family: monospace;
-  font-size: 11px;
-  color: var(--accent-light);
-  white-space: nowrap;
-  direction: rtl;
-}
-
-/* ══════════════════════════════════════════════
-   صفحه لاگین — طرح گرافیکی جدید
-══════════════════════════════════════════════ */
-
-.lp-body {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-  position: fixed;
-  inset: 0;
-  overflow: hidden;
-  z-index: 1000;
-}
-
-/* ذرات پس‌زمینه */
-.lp-particles {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.lp-particles span {
-  position: absolute;
-  display: block;
-  border-radius: 50%;
-  animation: lp-float linear infinite;
-  opacity: 0;
-}
-
-.lp-particles span:nth-child(1)  { width:80px;  height:80px;  background:rgba(108,99,255,.15); left:10%;  animation-duration:18s; animation-delay:0s;   bottom:-80px; }
-.lp-particles span:nth-child(2)  { width:30px;  height:30px;  background:rgba(168,85,247,.2);  left:25%;  animation-duration:14s; animation-delay:2s;   bottom:-30px; }
-.lp-particles span:nth-child(3)  { width:55px;  height:55px;  background:rgba(59,130,246,.15); left:40%;  animation-duration:20s; animation-delay:4s;   bottom:-55px; }
-.lp-particles span:nth-child(4)  { width:20px;  height:20px;  background:rgba(108,99,255,.25); left:60%;  animation-duration:12s; animation-delay:1s;   bottom:-20px; }
-.lp-particles span:nth-child(5)  { width:45px;  height:45px;  background:rgba(168,85,247,.12); left:72%;  animation-duration:16s; animation-delay:3s;   bottom:-45px; }
-.lp-particles span:nth-child(6)  { width:65px;  height:65px;  background:rgba(34,211,238,.1);  left:85%;  animation-duration:22s; animation-delay:0.5s; bottom:-65px; }
-.lp-particles span:nth-child(7)  { width:25px;  height:25px;  background:rgba(108,99,255,.2);  left:5%;   animation-duration:15s; animation-delay:5s;   bottom:-25px; }
-.lp-particles span:nth-child(8)  { width:90px;  height:90px;  background:rgba(59,130,246,.08); left:50%;  animation-duration:25s; animation-delay:2.5s; bottom:-90px; }
-
-@keyframes lp-float {
-  0%   { transform: translateY(0)   rotate(0deg);   opacity: 0; }
-  10%  { opacity: 1; }
-  90%  { opacity: 0.6; }
-  100% { transform: translateY(-110vh) rotate(720deg); opacity: 0; }
-}
-
-/* کارت اصلی */
-.lp-card {
-  position: relative;
-  z-index: 10;
-  width: 100%;
-  max-width: 440px;
-  margin: 20px;
-  background: rgba(22, 25, 32, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(108,99,255,0.25);
-  border-radius: 28px;
-  padding: 40px 36px;
-  box-shadow: 0 25px 60px rgba(0,0,0,0.5), 0 0 80px rgba(108,99,255,0.1);
-  animation: lp-card-in 0.7s cubic-bezier(0.34,1.56,0.64,1) both;
-}
-
-@keyframes lp-card-in {
-  from { opacity: 0; transform: translateY(40px) scale(0.95); }
-  to   { opacity: 1; transform: translateY(0)    scale(1); }
-}
-
-/* لوگو */
-.lp-logo { text-align: center; margin-bottom: 28px; }
-
-.lp-logo-ring {
-  width: 80px; height: 80px;
-  border-radius: 22px;
-  background: linear-gradient(135deg, #6c63ff, #a855f7);
-  display: flex; align-items: center; justify-content: center;
-  margin: 0 auto 14px;
-  position: relative;
-  box-shadow: 0 8px 32px rgba(108,99,255,0.4);
-  animation: lp-glow 3s ease-in-out infinite;
-}
-
-@keyframes lp-glow {
-  0%,100% { box-shadow: 0 8px 32px rgba(108,99,255,0.4); }
-  50%      { box-shadow: 0 8px 48px rgba(108,99,255,0.7), 0 0 60px rgba(168,85,247,0.3); }
-}
-
-.lp-logo-ring::before {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 25px;
-  background: linear-gradient(135deg, #6c63ff, #a855f7, #3b82f6);
-  z-index: -1;
-  opacity: 0.5;
-  animation: lp-ring-rotate 4s linear infinite;
-}
-
-@keyframes lp-ring-rotate {
-  to { filter: hue-rotate(360deg); }
-}
-
-.lp-logo-inner { font-size: 38px; line-height: 1; }
-
-.lp-title {
-  font-size: 24px;
-  font-weight: 900;
-  background: linear-gradient(135deg, #a78bfa, #60a5fa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  letter-spacing: 1px;
-  margin-bottom: 4px;
-}
-
-.lp-sub {
-  font-size: 13px;
-  color: rgba(255,255,255,0.45);
-  letter-spacing: 0.3px;
-}
-
-/* نوار مراحل */
-.lp-steps-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  margin-bottom: 28px;
-}
-
-.lp-step-dot {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.07);
-  border: 2px solid rgba(255,255,255,0.1);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700;
-  color: rgba(255,255,255,0.3);
-  transition: all 0.4s ease;
-  flex-shrink: 0;
-}
-
-.lp-step-dot.active {
-  background: linear-gradient(135deg, #6c63ff, #a855f7);
-  border-color: transparent;
-  color: #fff;
-  box-shadow: 0 0 16px rgba(108,99,255,0.6);
-}
-
-.lp-step-dot.done {
-  background: #22c55e;
-  border-color: transparent;
-  color: #fff;
-  box-shadow: 0 0 12px rgba(34,197,94,0.4);
-}
-
-.lp-step-line {
-  flex: 1;
-  height: 2px;
-  background: rgba(255,255,255,0.08);
-  max-width: 60px;
-  transition: background 0.4s;
-}
-
-.lp-step-line.active { background: linear-gradient(90deg, #6c63ff, #a855f7); }
-
-/* محتوای هر مرحله */
-.lp-step { display: none; animation: lp-step-in 0.4s ease both; }
-.lp-step.active { display: block; }
-
-@keyframes lp-step-in {
-  from { opacity: 0; transform: translateX(-16px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-.lp-step-label {
-  font-size: 14px;
-  color: rgba(255,255,255,0.6);
-  margin-bottom: 16px;
-  text-align: center;
-}
-
-/* اینپوت */
-.lp-input-wrap {
-  position: relative;
-  margin-bottom: 14px;
-}
-
-.lp-input-icon {
-  position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 16px;
-  color: rgba(255,255,255,0.3);
-  pointer-events: none;
-  z-index: 1;
-}
-
-.lp-input {
-  width: 100%;
-  padding: 14px 46px 14px 16px;
-  background: rgba(255,255,255,0.06);
-  border: 1.5px solid rgba(255,255,255,0.1);
-  border-radius: 14px;
-  color: #fff;
-  font-family: inherit;
-  font-size: 15px;
-  outline: none;
-  transition: all 0.3s;
-  direction: ltr;
-  text-align: left;
-}
-
-.lp-input::placeholder { color: rgba(255,255,255,0.25); }
-
-.lp-input:focus {
-  border-color: #6c63ff;
-  background: rgba(108,99,255,0.1);
-  box-shadow: 0 0 0 3px rgba(108,99,255,0.2);
-}
-
-.lp-otp-wrap { margin-bottom: 14px; }
-
-.lp-otp {
-  text-align: center;
-  font-size: 22px;
-  letter-spacing: 12px;
-  padding-right: 16px;
-}
-
-/* دکمه */
-.lp-btn {
-  width: 100%;
-  padding: 14px 20px;
-  background: linear-gradient(135deg, #6c63ff 0%, #a855f7 100%);
-  border: none;
-  border-radius: 14px;
-  color: #fff;
-  font-family: inherit;
-  font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  transition: all 0.3s;
-  box-shadow: 0 6px 24px rgba(108,99,255,0.35);
-  position: relative;
-  overflow: hidden;
-}
-
-.lp-btn::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
-  opacity: 0;
-  transition: opacity 0.3s;
-}
-
-.lp-btn:hover::before { opacity: 1; }
-.lp-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(108,99,255,0.5); }
-.lp-btn:active { transform: translateY(0); }
-.lp-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-
-.lp-btn-arrow { font-size: 18px; transition: transform 0.3s; }
-.lp-btn:hover .lp-btn-arrow { transform: translateX(-4px); }
-
-/* خطا */
-.lp-error {
-  display: none;
-  align-items: center;
-  gap: 8px;
-  background: rgba(239,68,68,0.12);
-  border: 1px solid rgba(239,68,68,0.25);
-  color: #fca5a5;
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-size: 13px;
-  margin-top: 10px;
-}
-
-.lp-error::before { content: "⚠️"; }
-
-/* اسپینر */
-.lp-spinner {
-  display: inline-block;
-  width: 20px; height: 20px;
-  border: 2px solid rgba(255,255,255,0.3);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-  vertical-align: middle;
-}
-
-/* صفحه موفقیت */
-.lp-success-anim { text-align: center; padding: 10px 0 6px; }
-
-.lp-success-ring {
-  width: 72px; height: 72px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #22c55e, #16a34a);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 32px; color: #fff;
-  margin: 0 auto 16px;
-  box-shadow: 0 0 40px rgba(34,197,94,0.5);
-  animation: lp-success-pop 0.5s cubic-bezier(0.34,1.56,0.64,1) both;
-}
-
-@keyframes lp-success-pop {
-  from { transform: scale(0); opacity: 0; }
-  to   { transform: scale(1); opacity: 1; }
-}
-
-.lp-success-title {
-  font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 6px;
-}
-
-.lp-success-sub {
-  font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 20px;
-}
-
-.lp-loading-bar {
-  height: 4px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.lp-loading-fill {
-  height: 100%;
-  width: 0;
-  background: linear-gradient(90deg, #6c63ff, #a855f7);
-  border-radius: 4px;
-  animation: lp-load 2s ease forwards;
-}
-
-@keyframes lp-load {
-  to { width: 100%; }
-}
-
-/* موبایل */
-@media (max-width: 480px) {
-  .lp-card { padding: 30px 20px; margin: 12px; border-radius: 20px; }
-  .lp-title { font-size: 20px; }
-  .lp-logo-ring { width: 64px; height: 64px; border-radius: 18px; }
-  .lp-logo-inner { font-size: 30px; }
-}
+import asyncio
+import os
+import threading
+from functools import wraps
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+from telethon.errors import (
+    SessionPasswordNeededError,
+    PhoneCodeInvalidError,
+    PhoneCodeExpiredError,
+    FloodWaitError,
+)
+import database as db
+import config
+from bot import bot_manager
+
+app = Flask(__name__)
+app.secret_key = config.SECRET_KEY
+
+# ─── پایگاه داده را همیشه هنگام بارگذاری ماژول بساز ──────────────────────────
+db.init_db()
+
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({"ok": False, "error": f"خطای داخلی سرور: {str(e)}"}), 500
+
+
+@app.errorhandler(Exception)
+def unhandled_exception(e):
+    return jsonify({"ok": False, "error": f"خطای غیرمنتظره: {str(e)}"}), 500
+
+# ─── event loop جداگانه برای Telethon ────────────────────────────────────────
+_loop = None
+_login_clients = {}   # {owner_id: TelegramClient} برای فرایند لاگین
+_phone_hashes = {}    # {owner_id: phone_code_hash}
+_phone_numbers = {}   # {owner_id: phone}
+
+
+def get_loop():
+    global _loop
+    if _loop is None or _loop.is_closed():
+        _loop = asyncio.new_event_loop()
+        t = threading.Thread(target=_loop.run_forever, daemon=True)
+        t.start()
+    return _loop
+
+
+def run_async(coro):
+    return asyncio.run_coroutine_threadsafe(coro, get_loop()).result(timeout=30)
+
+
+# ─── احراز هویت پنل ───────────────────────────────────────────────────────────
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("owner_id"):
+            if request.path.startswith("/api/"):
+                return jsonify({"ok": False, "error": "وارد نشده‌اید"}), 401
+            return redirect(url_for("panel_login_page"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def owner_id() -> int:
+    return int(session["owner_id"])
+
+
+# ─── keep-alive ───────────────────────────────────────────────────────────────
+@app.route("/ping")
+def ping():
+    return "pong", 200
+
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "bot": config.BOT_NAME}), 200
+
+
+# ─── ثبت‌نام / ورود پنل ───────────────────────────────────────────────────────
+@app.route("/")
+@login_required
+def index():
+    if db.get_setting(owner_id(), "logged_in") != "1":
+        return redirect(url_for("tg_login_page"))
+    return render_template(
+        "panel.html",
+        page="panel",
+        username=db.get_account(owner_id())["username"],
+        owner_id=owner_id(),
+    )
+
+
+@app.route("/register", methods=["GET"])
+def register_page():
+    if session.get("owner_id"):
+        return redirect(url_for("index"))
+    return render_template("panel.html", page="register")
+
+
+@app.route("/panel-login", methods=["GET"])
+def panel_login_page():
+    if session.get("owner_id"):
+        return redirect(url_for("index"))
+    has_accounts = db.account_exists()
+    return render_template("panel.html", page="panel_login",
+                           has_accounts=has_accounts)
+
+
+@app.route("/api/register", methods=["POST"])
+def api_register():
+    try:
+        data = request.json or {}
+        username = data.get("username", "").strip()
+        password = data.get("password", "").strip()
+        if not username or not password:
+            return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
+        if len(username) < 3:
+            return jsonify({"ok": False, "error": "یوزرنیم باید حداقل ۳ کاراکتر باشد"}), 400
+        if len(password) < 6:
+            return jsonify({"ok": False, "error": "رمز باید حداقل ۶ کاراکتر باشد"}), 400
+        new_id = db.create_account(username, password)
+        if new_id is None:
+            # شاید قبلاً ثبت شده، ولی نیمه‌کاره — بررسی کن
+            existing = db.get_account_by_username(username)
+            if existing:
+                return jsonify({"ok": False, "error": "این یوزرنیم قبلاً ثبت شده"}), 409
+            return jsonify({"ok": False, "error": "خطا در ایجاد حساب — لطفاً مجدداً تلاش کنید"}), 500
+        db.init_user_settings(new_id)
+        session["owner_id"] = new_id
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"خطای سرور: {str(e)}"}), 500
+
+
+@app.route("/api/panel-login", methods=["POST"])
+def api_panel_login():
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    if not username or not password:
+        return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
+    uid = db.verify_account(username, password)
+    if uid is None:
+        return jsonify({"ok": False, "error": "یوزرنیم یا رمز اشتباه است"}), 401
+    session["owner_id"] = uid
+    # اگه قبلاً لاگین بوده بات رو استارت کن (بدون کسر توکن)
+    if db.get_setting(uid, "logged_in") == "1":
+        bot_manager.start(uid, get_loop(), check_tokens=False)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/panel-logout", methods=["POST"])
+@login_required
+def api_panel_logout():
+    session.pop("owner_id", None)
+    return jsonify({"ok": True})
+
+
+# ─── لاگین تلگرام ────────────────────────────────────────────────────────────
+@app.route("/tg-login")
+@login_required
+def tg_login_page():
+    return render_template("panel.html", page="tg_login",
+                           username=db.get_account(owner_id())["username"])
+
+
+@app.route("/api/login/send_code", methods=["POST"])
+@login_required
+def send_code():
+    oid = owner_id()
+    data = request.json or {}
+    phone = data.get("phone", "").strip()
+    if not phone:
+        return jsonify({"ok": False, "error": "شماره تلفن الزامی است"}), 400
+    if not config.API_ID or not config.API_HASH:
+        return jsonify({"ok": False, "error": "API_ID و API_HASH تنظیم نشده‌اند"}), 400
+
+    async def _send():
+        cl = TelegramClient(StringSession(), config.API_ID, config.API_HASH)
+        await cl.connect()
+        result = await cl.send_code_request(phone)
+        # ذخیره session موقت در دیتابیس — مقاوم در برابر restart سرور
+        partial_sess = cl.session.save()
+        await cl.disconnect()
+        db.set_setting(oid, "_login_phone", phone)
+        db.set_setting(oid, "_login_phone_hash", result.phone_code_hash)
+        db.set_setting(oid, "_login_partial_session", partial_sess)
+        # همچنین در حافظه برای سرعت
+        _phone_hashes[oid] = result.phone_code_hash
+        _phone_numbers[oid] = phone
+        return {"ok": True}
+
+    try:
+        return jsonify(run_async(_send()))
+    except FloodWaitError as e:
+        return jsonify({"ok": False, "error": f"محدودیت: {e.seconds} ثانیه صبر کنید"}), 429
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/login/verify_code", methods=["POST"])
+@login_required
+def verify_code():
+    oid = owner_id()
+    data = request.json or {}
+    code = data.get("code", "").strip()
+    if not code:
+        return jsonify({"ok": False, "error": "کد الزامی است"}), 400
+
+    # اول از حافظه، اگر نبود از دیتابیس بخوان
+    phone = _phone_numbers.get(oid) or db.get_setting(oid, "_login_phone")
+    ph = _phone_hashes.get(oid) or db.get_setting(oid, "_login_phone_hash")
+    partial_sess = db.get_setting(oid, "_login_partial_session")
+
+    if not phone or not ph or not partial_sess:
+        return jsonify({"ok": False, "error": "ابتدا کد ارسال کنید (مجدداً شماره خود را وارد کنید)"}), 400
+
+    async def _verify():
+        cl = TelegramClient(StringSession(partial_sess), config.API_ID, config.API_HASH)
+        await cl.connect()
+        await cl.sign_in(phone=phone, code=code, phone_code_hash=ph)
+        me = await cl.get_me()
+        sess = cl.session.save()
+        await cl.disconnect()
+        # پاک کردن داده‌های موقت
+        _login_clients.pop(oid, None)
+        _phone_hashes.pop(oid, None)
+        _phone_numbers.pop(oid, None)
+        db.set_setting(oid, "_login_phone", "")
+        db.set_setting(oid, "_login_phone_hash", "")
+        db.set_setting(oid, "_login_partial_session", "")
+        # ذخیره session نهایی
+        db.set_setting(oid, "session_data", sess)
+        db.set_setting(oid, "logged_in", "1")
+        db.save_telegram_user_id(oid, me.id)
+        return {"ok": True}
+
+    try:
+        result = run_async(_verify())
+        bot_manager.start(oid, get_loop(), check_tokens=False)
+        return jsonify(result)
+    except SessionPasswordNeededError:
+        # session موقت رو نگه دار تا 2FA انجام بشه
+        return jsonify({"ok": False, "need_2fa": True}), 200
+    except (PhoneCodeInvalidError, PhoneCodeExpiredError):
+        return jsonify({"ok": False, "error": "کد اشتباه یا منقضی شده"}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/login/verify_2fa", methods=["POST"])
+@login_required
+def verify_2fa():
+    oid = owner_id()
+    data = request.json or {}
+    password = data.get("password", "").strip()
+    if not password:
+        return jsonify({"ok": False, "error": "رمز دو مرحله‌ای الزامی است"}), 400
+
+    phone = _phone_numbers.get(oid) or db.get_setting(oid, "_login_phone")
+    ph = _phone_hashes.get(oid) or db.get_setting(oid, "_login_phone_hash")
+    partial_sess = db.get_setting(oid, "_login_partial_session")
+    code = data.get("_code", "")  # کد قبلی که با 2FA همراه بود
+
+    if not partial_sess:
+        return jsonify({"ok": False, "error": "ابتدا کد تأیید را وارد کنید"}), 400
+
+    async def _verify():
+        cl = TelegramClient(StringSession(partial_sess), config.API_ID, config.API_HASH)
+        await cl.connect()
+        await cl.sign_in(password=password)
+        me = await cl.get_me()
+        sess = cl.session.save()
+        await cl.disconnect()
+        _login_clients.pop(oid, None)
+        _phone_hashes.pop(oid, None)
+        _phone_numbers.pop(oid, None)
+        db.set_setting(oid, "_login_phone", "")
+        db.set_setting(oid, "_login_phone_hash", "")
+        db.set_setting(oid, "_login_partial_session", "")
+        db.set_setting(oid, "session_data", sess)
+        db.set_setting(oid, "logged_in", "1")
+        db.save_telegram_user_id(oid, me.id)
+        return {"ok": True}
+
+    try:
+        result = run_async(_verify())
+        bot_manager.start(oid, get_loop(), check_tokens=False)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/logout", methods=["POST"])
+@login_required
+def tg_logout():
+    oid = owner_id()
+    bot_manager.stop(oid)
+    db.set_setting(oid, "logged_in", "0")
+    db.set_setting(oid, "session_data", "")
+    return jsonify({"ok": True})
+
+
+# ─── روشن / خاموش کردن سلف ───────────────────────────────────────────────────
+@app.route("/api/start", methods=["POST"])
+@login_required
+def start_bot_api():
+    oid = owner_id()
+    ok = bot_manager.start(oid, get_loop(), check_tokens=True)
+    if ok:
+        db.set_setting(oid, "self_bot_active", "1")
+        # تشخیص مالک برای پیام متفاوت
+        tg_id = db.get_telegram_id_by_owner(oid)
+        if tg_id == config.OWNER_TG_ID:
+            msg = "✅ سلف روشن شد — دسترسی رایگان مالک ♾️"
+        else:
+            hours = config.SESSION_HOURS
+            tokens = config.TOKENS_PER_SESSION
+            msg = f"✅ سلف روشن شد — {tokens} توکن کسر شد — {hours} ساعت فعال است"
+        return jsonify({"ok": True, "message": msg})
+    else:
+        balance = db.get_token_balance(oid)
+        return jsonify({
+            "ok": False,
+            "error": f"توکن کافی ندارید! موجودی: {balance} — برای روشن کردن {config.TOKENS_PER_SESSION} توکن لازم است.",
+        })
+
+
+@app.route("/api/stop", methods=["POST"])
+@login_required
+def stop_bot_api():
+    oid = owner_id()
+    bot_manager.stop(oid)
+    db.set_setting(oid, "self_bot_active", "0")
+    return jsonify({"ok": True})
+
+
+# ─── API تنظیمات ─────────────────────────────────────────────────────────────
+@app.route("/api/settings", methods=["GET"])
+@login_required
+def get_settings():
+    oid = owner_id()
+    keys = [
+        "self_bot_active", "secretary_active", "anti_delete_active",
+        "anti_link_active", "auto_seen_active", "auto_reaction_active",
+        "private_lock_active", "enemy_reply_active", "auto_save_media",
+        "clock_name_active", "clock_bio_active", "selected_font",
+        "secretary_message", "auto_reaction_emoji", "spam_delay",
+    ]
+    return jsonify({k: db.get_setting(oid, k) for k in keys})
+
+
+@app.route("/api/settings", methods=["POST"])
+@login_required
+def update_settings():
+    oid = owner_id()
+    data = request.json or {}
+    allowed = ["secretary_message", "auto_reaction_emoji", "selected_font", "spam_delay", "spam_count"]
+    for k in allowed:
+        if k in data:
+            db.set_setting(oid, k, data[k])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/toggle/<key>", methods=["POST"])
+@login_required
+def toggle(key):
+    allowed = [
+        "self_bot_active", "secretary_active", "anti_delete_active",
+        "anti_link_active", "auto_seen_active", "auto_reaction_active",
+        "private_lock_active", "enemy_reply_active", "auto_save_media",
+        "clock_name_active", "clock_bio_active",
+    ]
+    if key not in allowed:
+        return jsonify({"ok": False, "error": "کلید مجاز نیست"}), 400
+    new_state = db.toggle_setting(owner_id(), key)
+    return jsonify({"ok": True, "active": new_state})
+
+
+# ─── API توکن ─────────────────────────────────────────────────────────────────
+@app.route("/api/tokens", methods=["GET"])
+@login_required
+def get_tokens():
+    import telegram_bot as tb
+    oid = owner_id()
+    stats = db.get_token_stats(oid)
+    stats["ref_count"] = db.get_referral_count(oid)
+    stats["bot_username"] = tb.BOT_USERNAME or ""
+    stats["token_system_active"] = bool(config.BOT_TOKEN)
+    stats["tokens_per_session"] = config.TOKENS_PER_SESSION
+    stats["session_hours"] = config.SESSION_HOURS
+    stats["daily_gift"] = config.DAILY_TOKEN_GIFT
+    stats["referral_tokens"] = config.REFERRAL_TOKENS
+    return jsonify(stats)
+
+
+@app.route("/api/tokens/daily", methods=["POST"])
+@login_required
+def claim_daily():
+    oid = owner_id()
+    success, message = db.claim_daily_token(oid)
+    return jsonify({"ok": success, "message": message})
+
+
+# ─── API لیست‌ها ──────────────────────────────────────────────────────────────
+@app.route("/api/enemies", methods=["GET"])
+@login_required
+def get_enemies():
+    return jsonify(db.get_enemies(owner_id()))
+
+
+@app.route("/api/enemies", methods=["POST"])
+@login_required
+def add_enemy():
+    oid = owner_id()
+    data = request.json or {}
+    uid = data.get("user_id")
+    if not uid:
+        return jsonify({"ok": False, "error": "آیدی کاربر الزامی است"}), 400
+    db.add_enemy(oid, int(uid), data.get("username"), data.get("name"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/enemies/<int:uid>", methods=["DELETE"])
+@login_required
+def del_enemy(uid):
+    db.remove_enemy(owner_id(), uid)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/enemies/clear", methods=["POST"])
+@login_required
+def clear_enemies_api():
+    db.clear_enemies(owner_id())
+    return jsonify({"ok": True})
+
+
+@app.route("/api/friends", methods=["GET"])
+@login_required
+def get_friends():
+    return jsonify(db.get_friends(owner_id()))
+
+
+@app.route("/api/friends", methods=["POST"])
+@login_required
+def add_friend():
+    oid = owner_id()
+    data = request.json or {}
+    uid = data.get("user_id")
+    if not uid:
+        return jsonify({"ok": False, "error": "آیدی کاربر الزامی است"}), 400
+    db.add_friend(oid, int(uid), data.get("username"), data.get("name"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/friends/<int:uid>", methods=["DELETE"])
+@login_required
+def del_friend(uid):
+    db.remove_friend(owner_id(), uid)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/friends/clear", methods=["POST"])
+@login_required
+def clear_friends_api():
+    db.clear_friends(owner_id())
+    return jsonify({"ok": True})
+
+
+@app.route("/api/deleted_messages", methods=["GET"])
+@login_required
+def deleted_messages():
+    return jsonify(db.get_deleted_messages(owner_id(), 50))
+
+
+@app.route("/api/bot_status", methods=["GET"])
+@login_required
+def bot_status():
+    oid = owner_id()
+    running = bot_manager.is_running(oid)
+    logged_in = db.get_setting(oid, "logged_in") == "1"
+    return jsonify({"running": running, "logged_in": logged_in})
+
+
+# ─── اجرا ────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    db.init_db()
+    # استارت ربات توکن
+    from telegram_bot import start_token_bot
+    start_token_bot()
+    # استارت بات برای همه کاربران لاگین‌شده
+    loop = get_loop()
+    for oid in db.get_all_logged_in_users():
+        bot_manager.start(oid, loop, check_tokens=False)
+        print(f"🚀 بات کاربر {oid} استارت شد.")
+    app.run(host="0.0.0.0", port=config.PORT, debug=False)
