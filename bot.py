@@ -299,6 +299,7 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
     async def on_outgoing(event):
         text = event.raw_text.strip()
 
+        # ─── دستورات همیشه فعال (حتی وقتی سلف خاموش است) ─────────────────
         if text == "سلف روشن":
             db.set_setting(owner_id, "self_bot_active", "1")
             await _safe_edit(event, owner_id, "✅ سلف‌بات روشن شد.")
@@ -308,7 +309,33 @@ def _register_handlers(cl: TelegramClient, owner_id: int, entry: dict):
             await _safe_edit(event, owner_id, "❌ سلف‌بات خاموش شد.")
             return
 
-        if db.get_setting(owner_id, "self_bot_active") != "1":
+        # لیست دستورات تنظیماتی که همیشه فعال هستند
+        config_commands = [
+            "منشی روشن", "منشی خاموش", "پیام منشی",
+            "ضد حذف روشن", "ضد حذف خاموش",
+            "ضد لینک روشن", "ضد لینک خاموش",
+            "قفل پیوی روشن", "قفل پیوی خاموش",
+            "سین خودکار روشن", "سین خودکار خاموش",
+            "ری‌اکشن روشن", "ری‌اکشن خاموش",
+            "ذخیره مدیا روشن", "ذخیره مدیا خاموش",
+            "ساعت نام روشن", "ساعت نام خاموش",
+            "ساعت بیو روشن", "ساعت بیو خاموش",
+            "پاسخ دشمن روشن", "پاسخ دشمن خاموش",
+            "تنظیم دشمن", "حذف دشمن", "نمایش لیست دشمن", "پاک کردن لیست دشمن",
+            "تنظیم دوست", "حذف دوست", "نمایش لیست دوست", "پاک کردن لیست دوست",
+            "سایلنت چت روشن", "سایلنت چت خاموش", "سایلنت کاربر", "لغو سایلنت کاربر",
+            "فونت ", "لیست فونت",
+            "ذخیره ", "ارسال ذخیره ",
+            "ترجمه ", "هوا ", "قیمت دلار", "ارز",
+            "وضعیت", "راهنما", "help",
+            "حذف بعد ",
+            "توقف سیو",
+        ]
+
+        is_config_command = any(text.startswith(cmd) or text == cmd for cmd in config_commands)
+
+        # اگر دستور تنظیماتی نیست و سلف خاموش است، اجرا نکن
+        if not is_config_command and db.get_setting(owner_id, "self_bot_active") != "1":
             return
 
         await _handle_command(cl, event, text, owner_id, entry)
@@ -476,21 +503,22 @@ async def _handle_command(cl, event, text, owner_id, entry):
     elif text.startswith("فونت "):
         font_id = text.split()[-1]
         if font_id in FONTS:
-            ss("selected_font", font_id); await edit(f"🔤 فونت {font_id} انتخاب شد.")
+            ss("selected_font", font_id); await edit(f"🔤 فونت {font_id} انتخاب شد.\nاین فونت روی پیام‌ها و ساعت اعمال می‌شود.")
         else:
             await edit("❗ شماره فونت باید بین ۰ تا ۸ باشد.")
     elif text == "لیست فونت":
         samples = {"0":"متن عادی","1":"𝗕𝗼𝗹𝗱","2":"𝘐𝘵𝘢𝘭𝘪𝘤","3":"𝙼𝚘𝚗𝚘","4":"Ｆｕｌｌ","5":"𝐒𝐞𝐫𝐢𝐟","6":"𝒮𝒸𝓇𝒾𝓅𝓉","7":"S̶t̶r̶i̶k̶e̶","8":"U̲n̲d̲e̲r̲"}
         lines = ["📝 فونت‌های موجود:\n"] + [f"فونت {k} — {v}" for k, v in samples.items()]
+        lines.append("\n💡 فونت انتخابی روی ساعت نام/بیو هم اعمال می‌شود!")
         await edit("\n".join(lines))
 
     # ─── ساعت ────────────────────────────────────────────────────────────────
     elif text == "ساعت نام روشن":
-        ss("clock_name_active", "1"); await edit("⏰ ساعت در نام روشن شد.")
+        ss("clock_name_active", "1"); await edit("⏰ ساعت در نام روشن شد.\n💡 فونت فعلی روی ساعت اعمال می‌شود.")
     elif text == "ساعت نام خاموش":
         ss("clock_name_active", "0"); await edit("⏰ ساعت در نام خاموش شد.")
     elif text == "ساعت بیو روشن":
-        ss("clock_bio_active", "1"); await edit("⏰ ساعت در بیو روشن شد.")
+        ss("clock_bio_active", "1"); await edit("⏰ ساعت در بیو روشن شد.\n💡 فونت فعلی روی ساعت اعمال می‌شود.")
     elif text == "ساعت بیو خاموش":
         ss("clock_bio_active", "0"); await edit("⏰ ساعت در بیو خاموش شد.")
 
@@ -778,6 +806,12 @@ def _help_text():
 🔹 سیو مدیا:
 • سیو کانال [@یوزرنیم یا لینک] [تعداد]
 • توقف سیو
+
+🔹 فونت:
+• فونت [0-8] — تغییر فونت پیام‌ها و ساعت
+• لیست فونت — نمایش نمونه‌ها
+
+💡 نکته: فونت انتخابی روی ساعت نام/بیو هم اعمال می‌شود!
 """
 
 
@@ -785,10 +819,16 @@ def _help_text():
 async def _clock_loop(cl, owner_id):
     while True:
         try:
+            # ✅ اعمال فونت روی ساعت
+            time_str = persian_time()
+            font_id = db.get_setting(owner_id, "selected_font", "0")
+            fn = FONTS.get(font_id, FONTS["0"])
+            styled_time = fn(time_str)
+            
             if db.get_setting(owner_id, "clock_name_active") == "1":
-                await cl(UpdateProfileRequest(last_name=persian_time()[:64]))
+                await cl(UpdateProfileRequest(last_name=styled_time[:64]))
             if db.get_setting(owner_id, "clock_bio_active") == "1":
-                await cl(UpdateProfileRequest(about=f"آخرین به‌روزرسانی: {persian_time()}"[:70]))
+                await cl(UpdateProfileRequest(about=f"⏰ {styled_time}"[:70]))
         except Exception:
             pass
         await asyncio.sleep(60)
