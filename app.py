@@ -512,9 +512,9 @@ if __name__ == "__main__":
     
     # ✅ استارت خودکار سلف‌بات‌های فعال برای پایداری بعد از ری‌استارت
     loop = get_loop()
-    active_bots = db.get_all_active_bots()
-    for oid in active_bots:
-        if db.get_setting(oid, "session_data"):
+    logged_in_users = db.get_all_logged_in_users()
+    for oid in logged_in_users:
+        if db.get_setting(oid, "session_data") and db.get_setting(oid, "self_bot_active") == "1":
             bot_manager.start(oid, loop, check_tokens=False)
             print(f"🚀 سلف‌بات کاربر {oid} پس از ری‌استارت مجدداً فعال شد.")
             
