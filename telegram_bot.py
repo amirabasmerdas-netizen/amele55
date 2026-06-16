@@ -30,17 +30,19 @@ def start_token_bot():
         _bot = None
         return
 
+    # حذف webhook قبلی و پاک کردن pending updates (جلوگیری از خطای 409)
     import time as _time
     for attempt in range(3):
         try:
             _bot.delete_webhook(drop_pending_updates=True)
             print(f"🧹 Webhook حذف شد (تلاش {attempt+1})")
-            _time.sleep(5)
+            _time.sleep(5)  # صبر کافی برای قطع اتصال قدیمی
             break
         except Exception as e:
             print(f"⚠️ delete_webhook (تلاش {attempt+1}): {e}")
             _time.sleep(3)
 
+    # ─── /start ─────────────────────────────────────────────────────────────
     @_bot.message_handler(commands=["start"])
     def cmd_start(message):
         tg_id = message.from_user.id
@@ -113,6 +115,7 @@ def start_token_bot():
                 reply_markup=site_markup,
             )
 
+    # ─── موجودی ─────────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("💰 موجودی", "/balance"))
     @_bot.message_handler(commands=["balance"])
     def cmd_balance(message):
@@ -131,6 +134,7 @@ def start_token_bot():
             f"⚡ هر ۲ توکن = ۲ ساعت سلف روشن",
         )
 
+    # ─── هدیه روزانه ────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("🎁 هدیه روزانه", "/daily"))
     @_bot.message_handler(commands=["daily"])
     def cmd_daily(message):
@@ -145,6 +149,7 @@ def start_token_bot():
         else:
             _bot.reply_to(message, msg)
 
+    # ─── رفرال ──────────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("🔗 رفرال", "/referral"))
     @_bot.message_handler(commands=["referral"])
     def cmd_referral(message):
@@ -163,6 +168,7 @@ def start_token_bot():
             f"لینک را کپی کرده و برای دوستانتان بفرستید!",
         )
 
+    # ─── خرید توکن ──────────────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text in ("🛒 خرید توکن", "/buy"))
     @_bot.message_handler(commands=["buy"])
     def cmd_buy(message):
@@ -184,6 +190,7 @@ def start_token_bot():
             reply_markup=markup if config.OWNER_USERNAME else None,
         )
 
+    # ─── دستور /give (فقط مالک) ─────────────────────────────────────────────
     @_bot.message_handler(commands=["give"])
     def cmd_give(message):
         if message.from_user.id != config.OWNER_TG_ID:
@@ -230,6 +237,7 @@ def start_token_bot():
             except Exception:
                 pass
 
+    # ─── دستور /users (فقط مالک - لیست کاربران) ────────────────────────────
     @_bot.message_handler(commands=["users"])
     def cmd_users(message):
         if message.from_user.id != config.OWNER_TG_ID:
@@ -244,6 +252,7 @@ def start_token_bot():
             lines.append(f"• <b>{acc['username']}</b> — ID:{acc['id']} — 🪙{bal}")
         _bot.reply_to(message, "\n".join(lines))
 
+    # ─── پیام‌های متنی ناشناخته ──────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: True)
     def cmd_unknown(message):
         account = db.get_account_by_tg_id(message.from_user.id)
