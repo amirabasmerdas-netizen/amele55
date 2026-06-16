@@ -8,7 +8,7 @@ API_HASH = os.environ.get("API_HASH", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "amel_self55_secret_key_change_me")
 PORT = int(os.environ.get("PORT", 5000))
 
-# ✅ تغییر از SQLite به PostgreSQL (Supabase)
+# ✅ اتصال به Supabase PostgreSQL
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
