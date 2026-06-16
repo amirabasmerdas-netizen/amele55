@@ -11,7 +11,15 @@ services:
         sync: false
       - key: SECRET_KEY
         generateValue: true
-      - key: SESSION_NAME
-        value: amel_session
+      - key: BOT_TOKEN
+        sync: false
+      - key: OWNER_TG_ID
+        value: "8296865861"
+      - key: OWNER_USERNAME
+        value: "amele55"
+      - key: OWNER_PHONE
+        sync: false
+      - key: SITE_URL
+        sync: false
       - key: PORT
         value: "10000"
