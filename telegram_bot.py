@@ -8,8 +8,10 @@ _bot = None
 BOT_USERNAME = None
 OWNER_TG_ID = 8296865861  # آیدی عددی مالک
 
+
 def get_bot():
     return _bot
+
 
 def start_token_bot():
     global _bot, BOT_USERNAME
@@ -38,7 +40,7 @@ def start_token_bot():
         except:
             _time.sleep(3)
 
-    # ─── تابع نمایش اجباری عضویت (اولین چیزی که کاربر می‌بیند) ─────────────
+    # ─── تابع نمایش اجباری عضویت ─────────────────────────────────────────────
     def send_forced_channels_menu(message, missing_channels):
         markup = types.InlineKeyboardMarkup(row_width=1)
         for ch in missing_channels:
@@ -55,7 +57,7 @@ def start_token_bot():
             reply_markup=markup
         )
 
-    # ─── /start (بررسی عضویت در خط اول) ─────────────────────────────────────
+    # ─── /start ─────────────────────────────────────────────────────────────
     @_bot.message_handler(commands=["start"])
     def cmd_start(message):
         tg_id = message.from_user.id
@@ -70,17 +72,21 @@ def start_token_bot():
                     referrer_tg = db.get_telegram_id_by_owner(referrer_id)
                     if referrer_tg:
                         try:
-                            _bot.send_message(referrer_tg, f"🎉 یک نفر با لینک شما عضو شد!\n<b>+{config.REFERRAL_TOKENS} توکن</b> دریافت کردید 🪙")
-                        except: pass
-            except: pass
+                            _bot.send_message(referrer_tg, 
+                                f"🎉 یک نفر با لینک شما عضو شد!\n"
+                                f"<b>+{config.REFERRAL_TOKENS} توکن</b> دریافت کردید 🪙")
+                        except:
+                            pass
+            except:
+                pass
 
         # ۲. بررسی فوری عضویت در کانال‌ها
         is_member, missing = db.check_user_membership(_bot, tg_id)
         if not is_member:
             send_forced_channels_menu(message, missing)
-            return  # ⛔️ توقف اجرا! منوی اصلی نشان داده نمی‌شود.
+            return
 
-        # ۳. اگر عضو بود، ادامه بده...
+        # ۳. ادامه...
         site_url = getattr(config, "SITE_URL", "")
         account = db.get_account_by_tg_id(tg_id)
 
@@ -88,12 +94,17 @@ def start_token_bot():
             markup = types.InlineKeyboardMarkup()
             if site_url:
                 markup.add(types.InlineKeyboardButton("🌐 ورود به پنل وب", url=site_url))
-            _bot.reply_to(message, "👋 <b>سلام!</b>\n\nبرای استفاده از ربات:\n1️⃣ در پنل وب ثبت‌نام کنید\n2️⃣ حساب تلگرام را وصل کنید\n3️⃣ دوباره /start بزنید", reply_markup=markup if site_url else None)
+            _bot.reply_to(message, 
+                "👋 <b>سلام!</b>\n\n"
+                "برای استفاده از ربات:\n"
+                "1️⃣ در پنل وب ثبت‌نام کنید\n"
+                "2️⃣ حساب تلگرام را وصل کنید\n"
+                "3️⃣ دوباره /start بزنید", 
+                reply_markup=markup if site_url else None)
             return
 
         stats = db.get_token_stats(account["id"])
         
-        # انتخاب کیبورد بر اساس مالک بودن
         if tg_id == OWNER_TG_ID:
             markup = _owner_keyboard()
         else:
@@ -104,9 +115,17 @@ def start_token_bot():
             f"👋 سلام <b>{account['username']}</b>!\n\n"
             f"🪙 موجودی: <b>{stats['balance']}</b>\n"
             f"📊 کل دریافتی: <b>{stats['total_earned']}</b>\n\n"
-            f"⚡ هر <b>۲ توکن</b> = <b>۲ ساعت</b> سلف‌بات",
+            f"⚡ هر <b>۲ توکن</b> = <b>۲ ساعت</b> سلف‌بات\n"
+            f"💰 قیمت هر توکن: <b>{config.TOKEN_PRICE_TOMAN} تومان</b>",
             reply_markup=markup
         )
+
+        # ✅ نمایش اسپانسرها در انتهای استارت
+        sponsors_text = "🤝 <b>اسپانسرهای رسمی پروژه:</b>\n"
+        for sp in getattr(config, 'SPONSORS', []):
+            sponsors_text += f"🔸 @{sp['username']}\n"
+        sponsors_text += f"\n👑 <b>مالک و پشتیبانی:</b> @{config.OWNER_USERNAME}"
+        _bot.send_message(message.chat.id, sponsors_text)
 
     # ─── هندلر دکمه بررسی عضویت ─────────────────────────────────────────────
     @_bot.callback_query_handler(func=lambda call: call.data == "check_join")
@@ -114,13 +133,19 @@ def start_token_bot():
         is_member, missing = db.check_user_membership(_bot, call.from_user.id)
         if is_member:
             _bot.answer_callback_query(call.id, "عضویت تأیید شد! ✅")
-            try: _bot.delete_message(call.message.chat.id, call.message.message_id)
-            except: pass
-            cmd_start(call.message) # بازگشت به منوی اصلی
+            try:
+                _bot.delete_message(call.message.chat.id, call.message.message_id)
+            except:
+                pass
+            cmd_start(call.message)
         else:
-            _bot.answer_callback_query(call.id, f"هنوز در {len(missing)} کانال عضو نشده‌اید! ❌", show_alert=True)
+            _bot.answer_callback_query(
+                call.id, 
+                f"هنوز در {len(missing)} کانال عضو نشده‌اید! ❌", 
+                show_alert=True
+            )
 
-    # ─── توابع کمکی برای بررسی عضویت در همه دکمه‌ها ─────────────────────────
+    # ─── توابع کمکی ─────────────────────────────────────────────────────────
     def require_membership(message):
         is_member, missing = db.check_user_membership(_bot, message.from_user.id)
         if not is_member:
@@ -128,7 +153,7 @@ def start_token_bot():
             return False
         return True
 
-    # ─── دکمه‌های منوی اصلی (کاملاً دکمه‌ای) ───────────────────────────────
+    # ─── دکمه‌های منوی اصلی ─────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text == "💰 موجودی")
     def cmd_balance(message):
         if not require_membership(message): return
@@ -136,13 +161,22 @@ def start_token_bot():
         if not account: return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.")
         stats = db.get_token_stats(account["id"])
         ref_count = db.get_referral_count(account["id"])
-        _bot.reply_to(message, f"🪙 <b>موجودی توکن</b>\n\n💰 فعلی: <b>{stats['balance']}</b>\n📊 کل: <b>{stats['total_earned']}</b>\n👥 رفرال: <b>{ref_count}</b> نفر", reply_markup=_user_keyboard())
+        _bot.reply_to(
+            message,
+            f"🪙 <b>موجودی توکن</b>\n\n"
+            f"💰 فعلی: <b>{stats['balance']}</b>\n"
+            f"📊 کل: <b>{stats['total_earned']}</b>\n"
+            f"👥 رفرال: <b>{ref_count}</b> نفر\n"
+            f"💵 قیمت هر توکن: <b>{config.TOKEN_PRICE_TOMAN} تومان</b>",
+            reply_markup=_user_keyboard()
+        )
 
     @_bot.message_handler(func=lambda m: m.text == "🎁 هدیه روزانه")
     def cmd_daily(message):
         if not require_membership(message): return
         account = db.get_account_by_tg_id(message.from_user.id)
-        if not account: return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
+        if not account: 
+            return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
         success, msg = db.claim_daily_token(account["id"])
         if success:
             stats = db.get_token_stats(account["id"])
@@ -154,37 +188,56 @@ def start_token_bot():
     def cmd_referral(message):
         if not require_membership(message): return
         account = db.get_account_by_tg_id(message.from_user.id)
-        if not account: return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
+        if not account: 
+            return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
         link = f"https://t.me/{BOT_USERNAME}?start=ref_{account['id']}"
         ref_count = db.get_referral_count(account["id"])
-        _bot.reply_to(message, f"🔗 <b>لینک رفرال شما:</b>\n<code>{link}</code>\n\n👥 تعداد: <b>{ref_count}</b>\n🎁 پاداش: <b>{config.REFERRAL_TOKENS}</b> توکن", reply_markup=_user_keyboard())
+        _bot.reply_to(
+            message,
+            f"🔗 <b>لینک رفرال شما:</b>\n<code>{link}</code>\n\n"
+            f"👥 تعداد: <b>{ref_count}</b>\n"
+            f"🎁 پاداش: <b>{config.REFERRAL_TOKENS} توکن</b> (معادل {config.REFERRAL_TOKENS * config.TOKEN_PRICE_TOMAN} تومان)",
+            reply_markup=_user_keyboard()
+        )
 
     @_bot.message_handler(func=lambda m: m.text == "🛒 خرید توکن")
     def cmd_buy(message):
         if not require_membership(message): return
         account = db.get_account_by_tg_id(message.from_user.id)
         username_txt = account["username"] if account else str(message.from_user.id)
-        markup = types.InlineKeyboardMarkup()
-        if config.OWNER_USERNAME:
-            markup.add(types.InlineKeyboardButton("📩 پیام به مالک", url=f"https://t.me/{config.OWNER_USERNAME}"))
-        _bot.reply_to(message, f"🛒 <b>خرید توکن</b>\n\n👤 یوزرنیم پنل شما: <b>{username_txt}</b>\n\nبرای خرید به مالک پیام دهید.", reply_markup=markup)
+        
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("📩 خرید از مالک (@Amele55)", url="https://t.me/Amele55"))
+        for sp in getattr(config, 'SPONSORS', []):
+            markup.add(types.InlineKeyboardButton(f"🤝 {sp['name']}: @{sp['username']}", url=f"https://t.me/{sp['username']}"))
 
-    # ─── دستورات اختصاصی مالک (فقط با آیدی 8296865861 کار می‌کند) ─────────
+        _bot.reply_to(
+            message,
+            f"🛒 <b>خرید توکن</b>\n\n"
+            f"💰 قیمت هر توکن: <b>{config.TOKEN_PRICE_TOMAN} تومان</b>\n"
+            f"👤 یوزرنیم پنل شما: <b>{username_txt}</b>\n\n"
+            f"برای خرید، روی دکمه «خرید از مالک» کلیک کنید و یوزرنیم پنل خود را ارسال نمایید.",
+            reply_markup=markup
+        )
+
+    # ─── دستورات اختصاصی مالک ────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: m.text == "📢 مدیریت چنل‌ها")
     def cmd_admin_channels(message):
         if message.from_user.id != OWNER_TG_ID: return
         channels = db.get_forced_channels()
         if not channels:
-            text = "📋 لیست چنل‌ها خالی است.\n\nبرای افزودن از فرمت زیر در چت تایپ کنید:\n<code>/addchannel @ChannelID</code>"
+            text = "📋 لیست چنل‌ها خالی است.\n\nبرای افزودن:\n<code>/addchannel @ChannelID</code>"
         else:
-            text = "📋 <b>چنل‌های اجباری فعلی:</b>\n" + "\n".join([f"🔸 {ch}" for ch in channels]) + "\n\nبرای حذف:\n<code>/removechannel @ChannelID</code>"
+            text = "📋 <b>چنل‌های اجباری فعلی:</b>\n" + "\n".join([f"🔸 {ch}" for ch in channels])
+            text += "\n\nبرای حذف:\n<code>/removechannel @ChannelID</code>"
         _bot.reply_to(message, text, reply_markup=_owner_keyboard())
 
     @_bot.message_handler(commands=["addchannel"])
     def cmd_add_channel(message):
         if message.from_user.id != OWNER_TG_ID: return
         parts = message.text.strip().split()
-        if len(parts) < 2: return _bot.reply_to(message, "فرمت: <code>/addchannel @ChannelID</code>")
+        if len(parts) < 2: 
+            return _bot.reply_to(message, "فرمت: <code>/addchannel @ChannelID</code>")
         if db.add_forced_channel(parts[1]):
             _bot.reply_to(message, f"✅ چنل <b>{parts[1]}</b> اضافه شد.", reply_markup=_owner_keyboard())
         else:
@@ -194,7 +247,8 @@ def start_token_bot():
     def cmd_remove_channel(message):
         if message.from_user.id != OWNER_TG_ID: return
         parts = message.text.strip().split()
-        if len(parts) < 2: return _bot.reply_to(message, "فرمت: <code>/removechannel @ChannelID</code>")
+        if len(parts) < 2: 
+            return _bot.reply_to(message, "فرمت: <code>/removechannel @ChannelID</code>")
         if db.remove_forced_channel(parts[1]):
             _bot.reply_to(message, f"✅ چنل <b>{parts[1]}</b> حذف شد.", reply_markup=_owner_keyboard())
         else:
@@ -204,17 +258,48 @@ def start_token_bot():
     def cmd_give(message):
         if message.from_user.id != OWNER_TG_ID: return
         parts = message.text.strip().split()
-        if len(parts) < 3: return _bot.reply_to(message, "فرمت: <code>/give username amount</code>")
+        if len(parts) < 3: 
+            return _bot.reply_to(message, "فرمت: <code>/give username amount</code>")
         target = parts[1].lstrip("@")
-        try: amount = int(parts[2])
-        except: return _bot.reply_to(message, "❌ مقدار باید عدد باشد.")
+        try:
+            amount = int(parts[2])
+        except:
+            return _bot.reply_to(message, "❌ مقدار باید عدد باشد.")
         
         account = db.get_account_by_username(target)
-        if not account: return _bot.reply_to(message, f"❌ کاربر '{target}' یافت نشد.")
+        if not account: 
+            return _bot.reply_to(message, f"❌ کاربر '{target}' یافت نشد.")
         
         db.add_tokens(account["id"], amount)
         new_balance = db.get_token_balance(account["id"])
-        _bot.reply_to(message, f"✅ <b>{amount}</b> توکن به <b>{account['username']}</b> داده شد.\n💰 موجودی جدید: <b>{new_balance}</b>", reply_markup=_owner_keyboard())
+        _bot.reply_to(
+            message,
+            f"✅ <b>{amount}</b> توکن به <b>{account['username']}</b> داده شد.\n"
+            f"💰 موجودی جدید: <b>{new_balance}</b> (معادل {new_balance * config.TOKEN_PRICE_TOMAN} تومان)",
+            reply_markup=_owner_keyboard()
+        )
+        
+        # اطلاع به کاربر
+        tg_id = db.get_telegram_id_by_owner(account["id"])
+        if tg_id:
+            try:
+                _bot.send_message(tg_id, 
+                    f"🎁 <b>{amount}</b> توکن از طرف مالک دریافت کردید!\n"
+                    f"💰 موجودی جدید: <b>{new_balance}</b> توکن")
+            except:
+                pass
+
+    @_bot.message_handler(commands=["users"])
+    def cmd_users(message):
+        if message.from_user.id != OWNER_TG_ID: return
+        accounts = db.get_all_accounts()
+        if not accounts:
+            return _bot.reply_to(message, "هیچ کاربری ثبت نشده.")
+        lines = [f"👥 <b>کاربران ({len(accounts)} نفر):</b>\n"]
+        for acc in accounts[:20]:
+            bal = db.get_token_balance(acc["id"])
+            lines.append(f"• <b>{acc['username']}</b> — ID:{acc['id']} — 🪙{bal}")
+        _bot.reply_to(message, "\n".join(lines))
 
     # ─── پیام‌های ناشناخته ──────────────────────────────────────────────────
     @_bot.message_handler(func=lambda m: True)
@@ -234,12 +319,15 @@ def start_token_bot():
         import time as _t
         while True:
             try:
-                _bot.infinity_polling(timeout=30, long_polling_timeout=25, restart_on_change=False, skip_pending=True)
+                _bot.infinity_polling(timeout=30, long_polling_timeout=25, 
+                                      restart_on_change=False, skip_pending=True)
             except Exception as e:
                 if "409" in str(e):
                     _t.sleep(10)
-                    try: _bot.delete_webhook(drop_pending_updates=True)
-                    except: pass
+                    try:
+                        _bot.delete_webhook(drop_pending_updates=True)
+                    except:
+                        pass
                 else:
                     _t.sleep(5)
 
@@ -255,9 +343,10 @@ def _user_keyboard():
     markup.add("🔗 رفرال", "🛒 خرید توکن")
     return markup
 
+
 def _owner_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add("💰 موجودی", "🎁 هدیه روزانه")
     markup.add("🔗 رفرال", "🛒 خرید توکن")
-    markup.add("📢 مدیریت چنل‌ها")  # فقط مالک این دکمه را می‌بیند
+    markup.add("📢 مدیریت چنل‌ها")
     return markup
