@@ -510,11 +510,12 @@ if __name__ == "__main__":
     from telegram_bot import start_token_bot
     start_token_bot()
     
-    # ✅ استارت خودکار سلف‌بات‌های فعال برای پایداری بعد از آپدیت/ری‌استارت
+    # ✅ استارت خودکار سلف‌بات‌های فعال برای پایداری بعد از ری‌استارت
     loop = get_loop()
     active_bots = db.get_all_active_bots()
     for oid in active_bots:
-        bot_manager.start(oid, loop, check_tokens=False)
-        print(f"🚀 سلف‌بات کاربر {oid} پس از ری‌استارت مجدداً فعال شد.")
-        
+        if db.get_setting(oid, "session_data"):
+            bot_manager.start(oid, loop, check_tokens=False)
+            print(f"🚀 سلف‌بات کاربر {oid} پس از ری‌استارت مجدداً فعال شد.")
+            
     app.run(host="0.0.0.0", port=config.PORT, debug=False)
