@@ -14,7 +14,7 @@ from telethon.errors import (
 import database as db
 import config
 from bot import bot_manager
-import telegram_bot as tb  # ✅ import در بالای فایل
+import telegram_bot as tb
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -49,8 +49,8 @@ def get_loop():
 
 
 def run_async(coro):
-    # ✅ افزایش timeout به ۶۰ ثانیه
-    return asyncio.run_coroutine_threadsafe(coro, get_loop()).result(timeout=60)
+    # ✅ کاهش timeout به 30 ثانیه برای سرعت بیشتر
+    return asyncio.run_coroutine_threadsafe(coro, get_loop()).result(timeout=30)
 
 
 # ─── احراز هویت پنل ───────────────────────────────────────────────────────────
@@ -158,7 +158,6 @@ def api_panel_login():
         
     session["owner_id"] = uid
     
-    # ✅ بهینه‌سازی: فقط یک بار get_setting
     logged_in = db.get_setting(uid, "logged_in")
     self_active = db.get_setting(uid, "self_bot_active")
     
@@ -405,7 +404,6 @@ def toggle(key):
 @app.route("/api/tokens", methods=["GET"])
 @login_required
 def get_tokens():
-    # ✅ حذف import داخلی - از tb که در بالای فایل import شده استفاده می‌کنیم
     oid = owner_id()
     stats = db.get_token_stats(oid)
     stats["ref_count"] = db.get_referral_count(oid)
@@ -509,21 +507,16 @@ def bot_status():
 
 # ─── اجرا ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # ✅ حذف db.init_db() تکراری - فقط یک بار در بالای فایل اجرا می‌شود
-    
     # استارت ربات الماس
     from telegram_bot import start_token_bot
     start_token_bot()
     
-    # ✅ استارت خودکار سلف‌بات‌های فعال - بهینه‌شده
+    # استارت خودکار سلف‌بات‌های فعال
     loop = get_loop()
-    
-    # دریافت همه کاربران فعال در یک query
     active_users = db.get_all_logged_in_users()
     
     started_count = 0
     for oid in active_users:
-        # ✅ دریافت همه تنظیمات در یک بار
         session_data = db.get_setting(oid, "session_data")
         self_active = db.get_setting(oid, "self_bot_active")
         
@@ -537,4 +530,4 @@ if __name__ == "__main__":
     
     print(f"✅ مجموع {started_count} سلف‌بات فعال شد.")
             
-    app.run(host="0.0.0.0", port=config.PORT, debug=False)
+    app.run(host="0.0.0.0", port=config.PORT, debug=False, threaded=True)
