@@ -35,7 +35,6 @@ def init_db():
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""")
 
-    # افزودن ستون telegram_user_id اگر قبلاً نبوده
     try:
         c.execute("ALTER TABLE accounts ADD COLUMN telegram_user_id INTEGER")
     except Exception:
@@ -43,99 +42,120 @@ def init_db():
 
     # ─── تنظیمات (per-user) ───────────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS settings (
-        owner_id INTEGER NOT NULL,
-        key TEXT NOT NULL,
-        value TEXT NOT NULL,
-        PRIMARY KEY (owner_id, key)
-    )""")
+        owner_id INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+        PRIMARY KEY (owner_id, key))""")
 
     # ─── دشمن ─────────────────────────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS enemies (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        owner_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        username TEXT,
-        name TEXT,
-        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (owner_id, user_id)
-    )""")
+        id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL, username TEXT, name TEXT,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, user_id))""")
 
     # ─── دوست ─────────────────────────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS friends (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        owner_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        username TEXT,
-        name TEXT,
-        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (owner_id, user_id)
-    )""")
+        id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL, username TEXT, name TEXT,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, user_id))""")
 
     # ─── سایلنت چت ────────────────────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS silent_chats (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        owner_id INTEGER NOT NULL,
-        chat_id INTEGER NOT NULL,
-        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (owner_id, chat_id)
-    )""")
+        id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL,
+        chat_id INTEGER NOT NULL, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (owner_id, chat_id))""")
 
     # ─── سایلنت کاربر ─────────────────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS silent_users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        owner_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (owner_id, user_id)
-    )""")
+        id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (owner_id, user_id))""")
 
     # ─── پیام‌های ذخیره‌شده ────────────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS saved_messages (
-        owner_id INTEGER NOT NULL,
-        slot INTEGER NOT NULL,
-        content TEXT,
-        media_path TEXT,
-        saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (owner_id, slot)
-    )""")
+        owner_id INTEGER NOT NULL, slot INTEGER NOT NULL, content TEXT,
+        media_path TEXT, saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (owner_id, slot))""")
 
     # ─── پیام‌های حذف‌شده ─────────────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS deleted_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        owner_id INTEGER NOT NULL,
-        chat_id INTEGER,
-        sender_id INTEGER,
-        sender_name TEXT,
-        message TEXT,
-        media_type TEXT,
-        deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )""")
+        id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL,
+        chat_id INTEGER, sender_id INTEGER, sender_name TEXT,
+        message TEXT, media_type TEXT, deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
 
     # ─── پیام‌های زمان‌بندی‌شده ───────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS scheduled_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        owner_id INTEGER NOT NULL,
-        chat_id INTEGER NOT NULL,
-        message TEXT NOT NULL,
-        send_at TIMESTAMP NOT NULL,
-        sent INTEGER DEFAULT 0
-    )""")
+        id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL,
+        chat_id INTEGER NOT NULL, message TEXT NOT NULL,
+        send_at TIMESTAMP NOT NULL, sent INTEGER DEFAULT 0)""")
 
-    # ─── توکن‌ها ───────────────────────────────────────────────────────────────
+    # ─── الماس‌ها (تغییر نام از توکن) ─────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS tokens (
-        owner_id INTEGER PRIMARY KEY,
-        balance INTEGER DEFAULT 0,
-        last_daily TEXT DEFAULT NULL,
-        total_earned INTEGER DEFAULT 0
-    )""")
+        owner_id INTEGER PRIMARY KEY, balance INTEGER DEFAULT 0,
+        last_daily TEXT DEFAULT NULL, total_earned INTEGER DEFAULT 0)""")
 
     # ─── رفرال‌ها ──────────────────────────────────────────────────────────────
     c.execute("""CREATE TABLE IF NOT EXISTS referrals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        referrer_owner_id INTEGER NOT NULL,
+        id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_owner_id INTEGER NOT NULL,
         referred_tg_id INTEGER NOT NULL UNIQUE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )""")
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+    # ─── 🆕 چالش‌های جام جهانی ────────────────────────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS world_cup_challenges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team1 TEXT NOT NULL,
+        team2 TEXT NOT NULL,
+        match_time TEXT NOT NULL,
+        bet_amount INTEGER NOT NULL,
+        winner_team TEXT DEFAULT NULL,
+        status TEXT DEFAULT 'active',
+        message_id INTEGER DEFAULT NULL,
+        chat_id INTEGER DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+    # ─── 🆕 شرط‌بندی‌های جام جهانی ────────────────────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS world_cup_bets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        challenge_id INTEGER NOT NULL,
+        user_tg_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        team_choice TEXT NOT NULL,
+        bet_amount INTEGER NOT NULL,
+        result TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (challenge_id) REFERENCES world_cup_challenges(id),
+        UNIQUE (challenge_id, user_tg_id))""")
+
+    # ─── 🆕 قرعه‌کشی‌ها ───────────────────────────────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS lotteries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id INTEGER NOT NULL,
+        creator_tg_id INTEGER NOT NULL,
+        prize_amount INTEGER NOT NULL,
+        end_time TIMESTAMP NOT NULL,
+        winner_tg_id INTEGER DEFAULT NULL,
+        status TEXT DEFAULT 'active',
+        message_id INTEGER DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+    # ─── 🆕 شرکت‌کنندگان قرعه‌کشی ─────────────────────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS lottery_participants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lottery_id INTEGER NOT NULL,
+        user_tg_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        bet_amount INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (lottery_id) REFERENCES lotteries(id),
+        UNIQUE (lottery_id, user_tg_id))""")
+
+    # ─── 🆕 تراکنش‌های الماس ──────────────────────────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS diamond_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_owner_id INTEGER NOT NULL,
+        to_owner_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
 
     conn.commit()
     conn.close()
@@ -248,25 +268,13 @@ def get_telegram_id_by_owner(owner_id: int):
 
 # ─── تنظیمات ──────────────────────────────────────────────────────────────────
 SETTING_DEFAULTS = {
-    "self_bot_active": "0",
-    "secretary_active": "0",
-    "anti_delete_active": "0",
-    "anti_link_active": "0",
-    "auto_seen_active": "0",
-    "auto_reaction_active": "0",
-    "private_lock_active": "0",
-    "enemy_reply_active": "0",
-    "auto_save_media": "0",
-    "clock_name_active": "0",
-    "clock_bio_active": "0",
-    "selected_font": "0",
-    "secretary_message": "در حال حاضر در دسترس نیستم.",
-    "auto_reaction_emoji": "❤️",
-    "spam_active": "0",
-    "channel_save_active": "0",
-    "spam_delay": "2",
-    "session_data": "",
-    "logged_in": "0",
+    "self_bot_active": "0", "secretary_active": "0", "anti_delete_active": "0",
+    "anti_link_active": "0", "auto_seen_active": "0", "auto_reaction_active": "0",
+    "private_lock_active": "0", "enemy_reply_active": "0", "auto_save_media": "0",
+    "clock_name_active": "0", "clock_bio_active": "0", "selected_font": "0",
+    "secretary_message": "در حال حاضر در دسترس نیستم.", "auto_reaction_emoji": "❤️",
+    "spam_active": "0", "channel_save_active": "0", "spam_delay": "2",
+    "session_data": "", "logged_in": "0",
 }
 
 
@@ -321,11 +329,28 @@ def get_all_logged_in_users():
     return rows
 
 
-# ─── سیستم توکن ───────────────────────────────────────────────────────────────
+def get_all_active_bots():
+    """دریافت همه سلف‌های فعال برای پایداری بعد از restart"""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT s.owner_id FROM settings s
+        WHERE s.key = 'self_bot_active' AND s.value = '1'
+        AND EXISTS (
+            SELECT 1 FROM settings s2 
+            WHERE s2.owner_id = s.owner_id 
+            AND s2.key = 'logged_in' AND s2.value = '1'
+        )
+    """)
+    rows = [r["owner_id"] for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+# ─── سیستم الماس ──────────────────────────────────────────────────────────────
 def _ensure_tokens_row(conn, owner_id: int):
     c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO tokens (owner_id, balance, total_earned) VALUES (?, 0, 0)",
-              (owner_id,))
+    c.execute("INSERT OR IGNORE INTO tokens (owner_id, balance, total_earned) VALUES (?, 0, 0)", (owner_id,))
     conn.commit()
 
 
@@ -364,6 +389,43 @@ def deduct_tokens(owner_id: int, amount: int) -> bool:
     return True
 
 
+def transfer_diamonds(from_owner_id: int, to_owner_id: int, amount: int) -> tuple:
+    """انتقال الماس بین کاربران - برمی‌گرداند (success, message)"""
+    if amount <= 0:
+        return False, "❌ مقدار باید بزرگ‌تر از صفر باشد."
+    
+    if from_owner_id == to_owner_id:
+        return False, "❌ نمی‌توانید به خودتان الماس انتقال دهید."
+    
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, from_owner_id)
+        _ensure_tokens_row(conn, to_owner_id)
+        
+        c = conn.cursor()
+        c.execute("SELECT balance FROM tokens WHERE owner_id = ?", (from_owner_id,))
+        row = c.fetchone()
+        
+        if not row or row["balance"] < amount:
+            conn.close()
+            return False, f"❌ موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
+        
+        c.execute("UPDATE tokens SET balance = balance - ? WHERE owner_id = ?", (amount, from_owner_id))
+        c.execute("UPDATE tokens SET balance = balance + ? WHERE owner_id = ?", (amount, to_owner_id))
+        
+        # ثبت تراکنش
+        c.execute("""INSERT INTO diamond_transactions (from_owner_id, to_owner_id, amount, type, description)
+                     VALUES (?, ?, ?, 'transfer', 'انتقال الماس')""",
+                  (from_owner_id, to_owner_id, amount))
+        
+        conn.commit()
+        conn.close()
+        return True, f"✅ {amount} الماس با موفقیت انتقال یافت."
+    except Exception as e:
+        conn.close()
+        return False, f"❌ خطا در انتقال: {str(e)}"
+
+
 def claim_daily_token(owner_id: int):
     from config import DAILY_TOKEN_GIFT
     conn = get_conn()
@@ -374,12 +436,12 @@ def claim_daily_token(owner_id: int):
     today = datetime.date.today().isoformat()
     if row and row["last_daily"] == today:
         conn.close()
-        return False, "⏰ امروز قبلاً هدیه روزانه دریافت کردید."
+        return False, "⏰ امروز قبلاً هدیه روزانه دریافت کردید.\nفردا دوباره بیایید."
     c.execute("UPDATE tokens SET balance = balance + ?, total_earned = total_earned + ?, last_daily = ? WHERE owner_id = ?",
               (DAILY_TOKEN_GIFT, DAILY_TOKEN_GIFT, today, owner_id))
     conn.commit()
     conn.close()
-    return True, f"🎁 {DAILY_TOKEN_GIFT} توکن دریافت کردید!"
+    return True, f"🎁 {DAILY_TOKEN_GIFT} الماس روزانه دریافت کردید!"
 
 
 def process_referral(referrer_owner_id: int, referred_tg_id: int) -> bool:
@@ -708,3 +770,263 @@ def check_user_membership(bot, user_id: int) -> tuple:
         except Exception:
             missing.append(ch)
     return len(missing) == 0, missing
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 توابع جام جهانی
+# ══════════════════════════════════════════════════════════════════════════════
+def create_world_cup_challenge(team1: str, team2: str, match_time: str, bet_amount: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""INSERT INTO world_cup_challenges (team1, team2, match_time, bet_amount, status)
+                 VALUES (?, ?, ?, ?, 'active')""",
+              (team1, team2, match_time, bet_amount))
+    challenge_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return challenge_id
+
+
+def update_challenge_message(challenge_id: int, message_id: int, chat_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE world_cup_challenges SET message_id = ?, chat_id = ? WHERE id = ?",
+              (message_id, chat_id, challenge_id))
+    conn.commit()
+    conn.close()
+
+
+def get_active_challenges():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM world_cup_challenges WHERE status = 'active' ORDER BY created_at DESC")
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_challenge(challenge_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM world_cup_challenges WHERE id = ?", (challenge_id,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def place_bet(challenge_id: int, user_tg_id: int, owner_id: int, team_choice: str, bet_amount: int) -> tuple:
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor()
+        
+        # بررسی موجودی
+        c.execute("SELECT balance FROM tokens WHERE owner_id = ?", (owner_id,))
+        row = c.fetchone()
+        if not row or row["balance"] < bet_amount:
+            conn.close()
+            return False, f"❌ موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
+        
+        # بررسی شرکت قبلی
+        c.execute("SELECT 1 FROM world_cup_bets WHERE challenge_id = ? AND user_tg_id = ?",
+                  (challenge_id, user_tg_id))
+        if c.fetchone():
+            conn.close()
+            return False, "❌ شما قبلاً در این چالش شرکت کرده‌اید."
+        
+        # کسر الماس و ثبت شرط
+        c.execute("UPDATE tokens SET balance = balance - ? WHERE owner_id = ?", (bet_amount, owner_id))
+        c.execute("""INSERT INTO world_cup_bets (challenge_id, user_tg_id, owner_id, team_choice, bet_amount)
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (challenge_id, user_tg_id, owner_id, team_choice, bet_amount))
+        
+        conn.commit()
+        conn.close()
+        return True, f"✅ شرط {bet_amount} الماس روی {team_choice} ثبت شد."
+    except Exception as e:
+        conn.close()
+        return False, f"❌ خطا: {str(e)}"
+
+
+def get_challenge_bets(challenge_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM world_cup_bets WHERE challenge_id = ?", (challenge_id,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def set_challenge_winner(challenge_id: int, winner_team: str):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE world_cup_challenges SET winner_team = ?, status = 'finished' WHERE id = ?",
+              (winner_team, challenge_id))
+    conn.commit()
+    conn.close()
+
+
+def settle_challenge_bets(challenge_id: int):
+    """تسویه حساب شرط‌های یک چالش"""
+    challenge = get_challenge(challenge_id)
+    if not challenge or not challenge["winner_team"]:
+        return False, "❌ چالش یافت نشد یا برنده مشخص نشده."
+    
+    bets = get_challenge_bets(challenge_id)
+    results = []
+    
+    conn = get_conn()
+    try:
+        for bet in bets:
+            c = conn.cursor()
+            if bet["team_choice"] == challenge["winner_team"]:
+                # برنده: ۲ برابر دریافت می‌کند
+                winnings = bet["bet_amount"] * 2
+                c.execute("UPDATE tokens SET balance = balance + ? WHERE owner_id = ?",
+                          (winnings, bet["owner_id"]))
+                c.execute("UPDATE world_cup_bets SET result = 'won' WHERE id = ?", (bet["id"],))
+                results.append({
+                    "user_tg_id": bet["user_tg_id"],
+                    "owner_id": bet["owner_id"],
+                    "result": "won",
+                    "amount": winnings
+                })
+            else:
+                # بازنده: الماس کسر شده (قبلاً کسر شده)
+                c.execute("UPDATE world_cup_bets SET result = 'lost' WHERE id = ?", (bet["id"],))
+                results.append({
+                    "user_tg_id": bet["user_tg_id"],
+                    "owner_id": bet["owner_id"],
+                    "result": "lost",
+                    "amount": bet["bet_amount"]
+                })
+        
+        conn.commit()
+        conn.close()
+        return True, results
+    except Exception as e:
+        conn.close()
+        return False, str(e)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 توابع قرعه‌کشی
+# ══════════════════════════════════════════════════════════════════════════════
+def create_lottery(chat_id: int, creator_tg_id: int, prize_amount: int, duration_minutes: int):
+    conn = get_conn()
+    c = conn.cursor()
+    end_time = datetime.datetime.now() + datetime.timedelta(minutes=duration_minutes)
+    c.execute("""INSERT INTO lotteries (chat_id, creator_tg_id, prize_amount, end_time, status)
+                 VALUES (?, ?, ?, ?, 'active')""",
+              (chat_id, creator_tg_id, prize_amount, end_time.isoformat()))
+    lottery_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return lottery_id
+
+
+def update_lottery_message(lottery_id: int, message_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE lotteries SET message_id = ? WHERE id = ?", (message_id, lottery_id))
+    conn.commit()
+    conn.close()
+
+
+def get_active_lotteries():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM lotteries WHERE status = 'active' ORDER BY created_at DESC")
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_lottery(lottery_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM lotteries WHERE id = ?", (lottery_id,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def join_lottery(lottery_id: int, user_tg_id: int, owner_id: int, bet_amount: int) -> tuple:
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor()
+        
+        # بررسی موجودی
+        c.execute("SELECT balance FROM tokens WHERE owner_id = ?", (owner_id,))
+        row = c.fetchone()
+        if not row or row["balance"] < bet_amount:
+            conn.close()
+            return False, f"❌ موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
+        
+        # بررسی شرکت قبلی
+        c.execute("SELECT 1 FROM lottery_participants WHERE lottery_id = ? AND user_tg_id = ?",
+                  (lottery_id, user_tg_id))
+        if c.fetchone():
+            conn.close()
+            return False, "❌ شما قبلاً در این قرعه‌کشی شرکت کرده‌اید."
+        
+        # کسر الماس و ثبت شرکت
+        c.execute("UPDATE tokens SET balance = balance - ? WHERE owner_id = ?", (bet_amount, owner_id))
+        c.execute("""INSERT INTO lottery_participants (lottery_id, user_tg_id, owner_id, bet_amount)
+                     VALUES (?, ?, ?, ?)""",
+                  (lottery_id, user_tg_id, owner_id, bet_amount))
+        
+        conn.commit()
+        conn.close()
+        return True, f"✅ با {bet_amount} الماس در قرعه‌کشی شرکت کردید."
+    except Exception as e:
+        conn.close()
+        return False, f"❌ خطا: {str(e)}"
+
+
+def get_lottery_participants(lottery_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM lottery_participants WHERE lottery_id = ?", (lottery_id,))
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def finish_lottery(lottery_id: int, winner_tg_id: int, winner_owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        
+        # دریافت همه شرکت‌کنندگان
+        c.execute("SELECT * FROM lottery_participants WHERE lottery_id = ?", (lottery_id,))
+        participants = c.fetchall()
+        
+        # محاسبه کل الماس‌ها
+        total_prize = sum(p["bet_amount"] for p in participants)
+        
+        # انتقال همه الماس‌ها به برنده
+        c.execute("UPDATE tokens SET balance = balance + ? WHERE owner_id = ?",
+                  (total_prize, winner_owner_id))
+        
+        # به‌روزرسانی وضعیت قرعه‌کشی
+        c.execute("UPDATE lotteries SET winner_tg_id = ?, status = 'finished' WHERE id = ?",
+                  (winner_tg_id, lottery_id))
+        
+        conn.commit()
+        conn.close()
+        return True, total_prize
+    except Exception as e:
+        conn.close()
+        return False, str(e)
+
+
+def get_expired_lotteries():
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""SELECT * FROM lotteries 
+                 WHERE status = 'active' AND end_time <= datetime('now')""")
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
