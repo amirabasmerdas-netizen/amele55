@@ -14,11 +14,12 @@ from telethon.errors import (
 import database as db
 import config
 from bot import bot_manager
+import telegram_bot as tb  # ✅ import در بالای فایل
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
 
-# ─── پایگاه داده را همیشه هنگام بارگذاری ماژول بساز ──────────────────────────
+# ─── پایگاه داده را فقط یک بار بساز ────────────────────────────────────────────
 db.init_db()
 
 
@@ -33,9 +34,9 @@ def unhandled_exception(e):
 
 # ─── event loop جداگانه برای Telethon ────────────────────────────────────────
 _loop = None
-_login_clients = {}   # {owner_id: TelegramClient} برای فرایند لاگین
-_phone_hashes = {}    # {owner_id: phone_code_hash}
-_phone_numbers = {}   # {owner_id: phone}
+_login_clients = {}
+_phone_hashes = {}
+_phone_numbers = {}
 
 
 def get_loop():
@@ -48,7 +49,8 @@ def get_loop():
 
 
 def run_async(coro):
-    return asyncio.run_coroutine_threadsafe(coro, get_loop()).result(timeout=30)
+    # ✅ افزایش timeout به ۶۰ ثانیه
+    return asyncio.run_coroutine_threadsafe(coro, get_loop()).result(timeout=60)
 
 
 # ─── احراز هویت پنل ───────────────────────────────────────────────────────────
@@ -85,7 +87,6 @@ def index():
     oid = owner_id()
     account = db.get_account(oid)
     
-    # اگر حساب کاربری در دیتابیس پیدا نشد، سشن را پاک کن و به لاگین بفرست
     if not account:
         session.pop("owner_id", None)
         return redirect(url_for("panel_login_page"))
@@ -156,8 +157,12 @@ def api_panel_login():
         return jsonify({"ok": False, "error": "یوزرنیم یا رمز اشتباه است"}), 401
         
     session["owner_id"] = uid
-    # اگر قبلاً لاگین و فعال بوده، بات رو استارت کن
-    if db.get_setting(uid, "self_bot_active") == "1" and db.get_setting(uid, "logged_in") == "1":
+    
+    # ✅ بهینه‌سازی: فقط یک بار get_setting
+    logged_in = db.get_setting(uid, "logged_in")
+    self_active = db.get_setting(uid, "self_bot_active")
+    
+    if self_active == "1" and logged_in == "1":
         bot_manager.start(uid, get_loop(), check_tokens=False)
         
     return jsonify({"ok": True})
@@ -396,11 +401,11 @@ def toggle(key):
     return jsonify({"ok": True, "active": new_state})
 
 
-# ─── API الماس (توکن) ────────────────────────────────────────────────────────
+# ─── API الماس ────────────────────────────────────────────────────────────────
 @app.route("/api/tokens", methods=["GET"])
 @login_required
 def get_tokens():
-    import telegram_bot as tb
+    # ✅ حذف import داخلی - از tb که در بالای فایل import شده استفاده می‌کنیم
     oid = owner_id()
     stats = db.get_token_stats(oid)
     stats["ref_count"] = db.get_referral_count(oid)
@@ -504,18 +509,32 @@ def bot_status():
 
 # ─── اجرا ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    db.init_db()
+    # ✅ حذف db.init_db() تکراری - فقط یک بار در بالای فایل اجرا می‌شود
     
     # استارت ربات الماس
     from telegram_bot import start_token_bot
     start_token_bot()
     
-    # ✅ استارت خودکار سلف‌بات‌های فعال برای پایداری بعد از ری‌استارت
+    # ✅ استارت خودکار سلف‌بات‌های فعال - بهینه‌شده
     loop = get_loop()
-    logged_in_users = db.get_all_logged_in_users()
-    for oid in logged_in_users:
-        if db.get_setting(oid, "session_data") and db.get_setting(oid, "self_bot_active") == "1":
-            bot_manager.start(oid, loop, check_tokens=False)
-            print(f"🚀 سلف‌بات کاربر {oid} پس از ری‌استارت مجدداً فعال شد.")
+    
+    # دریافت همه کاربران فعال در یک query
+    active_users = db.get_all_logged_in_users()
+    
+    started_count = 0
+    for oid in active_users:
+        # ✅ دریافت همه تنظیمات در یک بار
+        session_data = db.get_setting(oid, "session_data")
+        self_active = db.get_setting(oid, "self_bot_active")
+        
+        if session_data and self_active == "1":
+            try:
+                bot_manager.start(oid, loop, check_tokens=False)
+                started_count += 1
+                print(f"🚀 سلف‌بات کاربر {oid} پس از ری‌استارت مجدداً فعال شد.")
+            except Exception as e:
+                print(f"❌ خطا در استارت سلف‌بات کاربر {oid}: {e}")
+    
+    print(f"✅ مجموع {started_count} سلف‌بات فعال شد.")
             
     app.run(host="0.0.0.0", port=config.PORT, debug=False)
