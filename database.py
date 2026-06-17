@@ -10,7 +10,7 @@ from config import DATABASE_URL
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🚀 Connection Pooling بهینه‌شده
+# 🚀 Connection Pooling فوق‌العاده سریع
 # ══════════════════════════════════════════════════════════════════════════════
 _connection_pool = None
 _pool_lock = threading.Lock()
@@ -23,13 +23,13 @@ def _get_pool():
             if _connection_pool is None:
                 try:
                     _connection_pool = psycopg2.pool.ThreadedConnectionPool(
-                        minconn=5,
-                        maxconn=20,
+                        minconn=10,     # ۱۰ connection همیشه باز
+                        maxconn=50,     # حداکثر ۵۰ connection همزمان
                         dsn=DATABASE_URL,
-                        connect_timeout=3,
-                        options="-c statement_timeout=5000 -c idle_in_transaction_session_timeout=10000"
+                        connect_timeout=2,
+                        options="-c statement_timeout=3000 -c idle_in_transaction_session_timeout=5000"
                     )
-                    print("✅ Connection pool ایجاد شد (min=5, max=20)")
+                    print("✅ Connection pool ایجاد شد (min=10, max=50)")
                 except Exception as e:
                     print(f"❌ خطا در ایجاد pool: {e}")
                     raise
@@ -40,7 +40,7 @@ def get_conn():
     try:
         return _get_pool().getconn()
     except Exception:
-        return psycopg2.connect(DATABASE_URL, connect_timeout=3)
+        return psycopg2.connect(DATABASE_URL, connect_timeout=2)
 
 
 def release_conn(conn):
@@ -58,16 +58,16 @@ def _hash_pw(password: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🚀 Multi-Layer Cache System
+# 🚀 Multi-Layer Cache System - فوق‌العاده سریع
 # ══════════════════════════════════════════════════════════════════════════════
-class MultiLayerCache:
-    def __init__(self, max_size=5000, ttl=120):
+class UltraFastCache:
+    def __init__(self, max_size=10000, ttl=300):
         self._cache = {}
         self._timestamps = {}
         self._access_count = {}
         self._max_size = max_size
         self._ttl = ttl
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # Reentrant lock برای سرعت بیشتر
     
     def get(self, key, default=None):
         now = _time.time()
@@ -77,8 +77,8 @@ class MultiLayerCache:
                     self._access_count[key] = self._access_count.get(key, 0) + 1
                     return self._cache[key]
                 else:
-                    del self._cache[key]
-                    del self._timestamps[key]
+                    self._cache.pop(key, None)
+                    self._timestamps.pop(key, None)
                     self._access_count.pop(key, None)
         return default
     
@@ -88,11 +88,15 @@ class MultiLayerCache:
             self._timestamps[key] = _time.time()
             self._access_count[key] = self._access_count.get(key, 0) + 1
             
+            # LRU eviction - حذف کم‌استفاده‌ترین
             while len(self._cache) > self._max_size:
-                min_key = min(self._access_count, key=self._access_count.get)
-                del self._cache[min_key]
-                del self._timestamps[min_key]
-                del self._access_count[min_key]
+                min_key = min(self._access_count, key=self._access_count.get, default=None)
+                if min_key:
+                    self._cache.pop(min_key, None)
+                    self._timestamps.pop(min_key, None)
+                    self._access_count.pop(min_key, None)
+                else:
+                    break
     
     def invalidate(self, pattern=None):
         with self._lock:
@@ -106,133 +110,129 @@ class MultiLayerCache:
                     self._cache.pop(k, None)
                     self._timestamps.pop(k, None)
                     self._access_count.pop(k, None)
+    
+    def get_stats(self):
+        with self._lock:
+            return {
+                "size": len(self._cache),
+                "max_size": self._max_size,
+                "ttl": self._ttl
+            }
 
 
-settings_cache = MultiLayerCache(max_size=3000, ttl=120)
-account_cache = MultiLayerCache(max_size=1000, ttl=600)
-list_cache = MultiLayerCache(max_size=2000, ttl=180)
-token_cache = MultiLayerCache(max_size=1000, ttl=60)
+# Cache instances با TTL های بهینه
+settings_cache = UltraFastCache(max_size=5000, ttl=300)      # ۵ دقیقه
+account_cache = UltraFastCache(max_size=2000, ttl=600)       # ۱۰ دقیقه
+list_cache = UltraFastCache(max_size=3000, ttl=180)          # ۳ دقیقه
+token_cache = UltraFastCache(max_size=2000, ttl=60)          # ۱ دقیقه
+challenge_cache = UltraFastCache(max_size=500, ttl=120)      # ۲ دقیقه
+lottery_cache = UltraFastCache(max_size=500, ttl=60)         # ۱ دقیقه
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# init_db - با ALTER TABLE برای ستون‌های جدید
+# init_db - با Index‌های بهینه + ALTER TABLE
 # ══════════════════════════════════════════════════════════════════════════════
 def init_db():
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # ─── حساب‌های پنل ────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS accounts (
-            id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL, telegram_user_id BIGINT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        # ─── جداول ───────────────────────────────────────────────────────────
+        tables = [
+            """CREATE TABLE IF NOT EXISTS accounts (
+                id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL, telegram_user_id BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS forced_channels (
+                id SERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS settings (
+                owner_id BIGINT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+                PRIMARY KEY (owner_id, key))""",
+            
+            """CREATE TABLE IF NOT EXISTS enemies (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                username TEXT, name TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (owner_id, user_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS friends (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                username TEXT, name TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (owner_id, user_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS silent_chats (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, chat_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS silent_users (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, user_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS saved_messages (
+                owner_id BIGINT NOT NULL, slot INTEGER NOT NULL, content TEXT, media_path TEXT,
+                saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (owner_id, slot))""",
+            
+            """CREATE TABLE IF NOT EXISTS deleted_messages (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT, sender_id BIGINT,
+                sender_name TEXT, message TEXT, media_type TEXT,
+                deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS scheduled_messages (
+                id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT NOT NULL,
+                message TEXT NOT NULL, send_at TIMESTAMP NOT NULL, sent INTEGER DEFAULT 0)""",
+            
+            """CREATE TABLE IF NOT EXISTS tokens (
+                owner_id BIGINT PRIMARY KEY, balance INTEGER DEFAULT 0,
+                last_daily TEXT DEFAULT NULL, total_earned INTEGER DEFAULT 0)""",
+            
+            """CREATE TABLE IF NOT EXISTS referrals (
+                id SERIAL PRIMARY KEY, referrer_owner_id BIGINT NOT NULL,
+                referred_tg_id BIGINT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS world_cup_challenges (
+                id SERIAL PRIMARY KEY, team1 TEXT NOT NULL, team2 TEXT NOT NULL,
+                match_time TEXT NOT NULL, bet_amount INTEGER NOT NULL,
+                winner_team TEXT DEFAULT NULL, status TEXT DEFAULT 'active',
+                message_id BIGINT DEFAULT NULL, chat_id BIGINT DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS world_cup_bets (
+                id SERIAL PRIMARY KEY, challenge_id BIGINT NOT NULL,
+                user_tg_id BIGINT NOT NULL, owner_id BIGINT NOT NULL,
+                team_choice TEXT NOT NULL, bet_amount INTEGER NOT NULL,
+                result TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (challenge_id, user_tg_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS lotteries (
+                id SERIAL PRIMARY KEY, chat_id BIGINT NOT NULL, creator_tg_id BIGINT NOT NULL,
+                prize_amount INTEGER NOT NULL, entry_fee INTEGER DEFAULT 1,
+                end_time TIMESTAMP NOT NULL, winner_tg_id BIGINT DEFAULT NULL,
+                status TEXT DEFAULT 'active', message_id BIGINT DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+            
+            """CREATE TABLE IF NOT EXISTS lottery_participants (
+                id SERIAL PRIMARY KEY, lottery_id BIGINT NOT NULL, user_tg_id BIGINT NOT NULL,
+                owner_id BIGINT NOT NULL, bet_amount INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (lottery_id, user_tg_id))""",
+            
+            """CREATE TABLE IF NOT EXISTS diamond_transactions (
+                id SERIAL PRIMARY KEY, from_owner_id BIGINT NOT NULL, to_owner_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL, type TEXT NOT NULL, description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""",
+        ]
+        
+        for table_sql in tables:
+            c.execute(table_sql)
 
-        # ─── چنل‌های اجباری ──────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS forced_channels (
-            id SERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-
-        # ─── تنظیمات ─────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS settings (
-            owner_id BIGINT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
-            PRIMARY KEY (owner_id, key))""")
-
-        # ─── دشمن ─────────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS enemies (
-            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
-            username TEXT, name TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (owner_id, user_id))""")
-
-        # ─── دوست ────────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS friends (
-            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
-            username TEXT, name TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (owner_id, user_id))""")
-
-        # ─── سایلنت چت ────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS silent_chats (
-            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT NOT NULL,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, chat_id))""")
-
-        # ─── سایلنت کاربر ─────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS silent_users (
-            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, user_id))""")
-
-        # ─── پیام‌های ذخیره‌شده ────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS saved_messages (
-            owner_id BIGINT NOT NULL, slot INTEGER NOT NULL, content TEXT, media_path TEXT,
-            saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (owner_id, slot))""")
-
-        # ─── پیام‌های حذف‌شده ─────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS deleted_messages (
-            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT, sender_id BIGINT,
-            sender_name TEXT, message TEXT, media_type TEXT,
-            deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-
-        # ─── پیام‌های زمان‌بندی‌شده ───────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS scheduled_messages (
-            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT NOT NULL,
-            message TEXT NOT NULL, send_at TIMESTAMP NOT NULL, sent INTEGER DEFAULT 0)""")
-
-        # ─── الماس‌ها ────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS tokens (
-            owner_id BIGINT PRIMARY KEY, balance INTEGER DEFAULT 0,
-            last_daily TEXT DEFAULT NULL, total_earned INTEGER DEFAULT 0)""")
-
-        # ─── رفرال‌ها ──────────────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS referrals (
-            id SERIAL PRIMARY KEY, referrer_owner_id BIGINT NOT NULL,
-            referred_tg_id BIGINT NOT NULL UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-
-        # ─── چالش‌های جام جهانی ──────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS world_cup_challenges (
-            id SERIAL PRIMARY KEY, team1 TEXT NOT NULL, team2 TEXT NOT NULL,
-            match_time TEXT NOT NULL, bet_amount INTEGER NOT NULL,
-            winner_team TEXT DEFAULT NULL, status TEXT DEFAULT 'active',
-            message_id BIGINT DEFAULT NULL, chat_id BIGINT DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-
-        c.execute("""CREATE TABLE IF NOT EXISTS world_cup_bets (
-            id SERIAL PRIMARY KEY, challenge_id BIGINT NOT NULL,
-            user_tg_id BIGINT NOT NULL, owner_id BIGINT NOT NULL,
-            team_choice TEXT NOT NULL, bet_amount INTEGER NOT NULL,
-            result TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (challenge_id, user_tg_id))""")
-
-        # ─── قرعه‌کشی‌ها - با ستون entry_fee جدید ─────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS lotteries (
-            id SERIAL PRIMARY KEY,
-            chat_id BIGINT NOT NULL,
-            creator_tg_id BIGINT NOT NULL,
-            prize_amount INTEGER NOT NULL,
-            entry_fee INTEGER DEFAULT 1,
-            end_time TIMESTAMP NOT NULL,
-            winner_tg_id BIGINT DEFAULT NULL,
-            status TEXT DEFAULT 'active',
-            message_id BIGINT DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
-
-        # ✅ اضافه کردن ستون entry_fee اگر جدول قبلاً وجود داشته باشد
+        # ✅ ALTER TABLE برای ستون‌های جدید
         try:
-            c.execute("""ALTER TABLE lotteries 
-                         ADD COLUMN IF NOT EXISTS entry_fee INTEGER DEFAULT 1""")
+            c.execute("ALTER TABLE lotteries ADD COLUMN IF NOT EXISTS entry_fee INTEGER DEFAULT 1")
         except Exception:
             pass
-
-        c.execute("""CREATE TABLE IF NOT EXISTS lottery_participants (
-            id SERIAL PRIMARY KEY, lottery_id BIGINT NOT NULL, user_tg_id BIGINT NOT NULL,
-            owner_id BIGINT NOT NULL, bet_amount INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (lottery_id, user_tg_id))""")
-
-        # ─── تراکنش‌های الماس ────────────────────────────────────────────────
-        c.execute("""CREATE TABLE IF NOT EXISTS diamond_transactions (
-            id SERIAL PRIMARY KEY, from_owner_id BIGINT NOT NULL, to_owner_id BIGINT NOT NULL,
-            amount INTEGER NOT NULL, type TEXT NOT NULL, description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
 
         # ✅ Index‌های بهینه‌شده
         indexes = [
@@ -241,15 +241,22 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_settings_owner_key ON settings(owner_id, key)",
             "CREATE INDEX IF NOT EXISTS idx_tokens_owner ON tokens(owner_id)",
             "CREATE INDEX IF NOT EXISTS idx_friends_owner ON friends(owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_friends_user ON friends(owner_id, user_id)",
             "CREATE INDEX IF NOT EXISTS idx_enemies_owner ON enemies(owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_enemies_user ON enemies(owner_id, user_id)",
             "CREATE INDEX IF NOT EXISTS idx_wc_bets_challenge ON world_cup_bets(challenge_id)",
+            "CREATE INDEX IF NOT EXISTS idx_wc_bets_user ON world_cup_bets(challenge_id, user_tg_id)",
             "CREATE INDEX IF NOT EXISTS idx_lottery_part ON lottery_participants(lottery_id)",
+            "CREATE INDEX IF NOT EXISTS idx_lottery_part_user ON lottery_participants(lottery_id, user_tg_id)",
             "CREATE INDEX IF NOT EXISTS idx_referrals_ref ON referrals(referrer_owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_referrals_tg ON referrals(referred_tg_id)",
             "CREATE INDEX IF NOT EXISTS idx_deleted_owner_time ON deleted_messages(owner_id, deleted_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_scheduled_pending ON scheduled_messages(owner_id, sent, send_at)",
             "CREATE INDEX IF NOT EXISTS idx_forced_channels_username ON forced_channels(username)",
             "CREATE INDEX IF NOT EXISTS idx_world_cup_challenges_status ON world_cup_challenges(status)",
             "CREATE INDEX IF NOT EXISTS idx_lotteries_status ON lotteries(status, end_time)",
+            "CREATE INDEX IF NOT EXISTS idx_silent_chats_owner ON silent_chats(owner_id, chat_id)",
+            "CREATE INDEX IF NOT EXISTS idx_silent_users_owner ON silent_users(owner_id, user_id)",
         ]
         
         for idx_sql in indexes:
@@ -263,8 +270,8 @@ def init_db():
         release_conn(conn)
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# مدیریت حساب
+# ══════════════════════════════════════════════════════════════════════════════
+# مدیریت حساب - با Cache
 # ══════════════════════════════════════════════════════════════════════════════
 def create_account(username: str, password: str):
     conn = get_conn()
@@ -430,8 +437,8 @@ def get_telegram_id_by_owner(owner_id: int):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# تنظیمات
-# ═════════════════════════════════════════════════════════════════════════════
+# تنظیمات - با Cache فوق‌العاده سریع
+# ══════════════════════════════════════════════════════════════════════════════
 SETTING_DEFAULTS = {
     "self_bot_active": "0", "secretary_active": "0", "anti_delete_active": "0",
     "anti_link_active": "0", "auto_seen_active": "0", "auto_reaction_active": "0",
@@ -511,7 +518,7 @@ def get_all_logged_in_users():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# سیستم الماس
+# سیستم الماس - با Cache
 # ══════════════════════════════════════════════════════════════════════════════
 def _ensure_tokens_row(conn, owner_id: int):
     c = conn.cursor()
@@ -572,7 +579,7 @@ def deduct_tokens(owner_id: int, amount: int) -> bool:
 
 def transfer_diamonds(from_owner_id: int, to_owner_id: int, amount: int) -> tuple:
     if amount <= 0:
-        return False, " مقدار باید بزرگ‌تر از صفر باشد."
+        return False, "❌ مقدار باید بزرگ‌تر از صفر باشد."
     if from_owner_id == to_owner_id:
         return False, "❌ نمی‌توانید به خودتان الماس انتقال دهید."
     
@@ -622,7 +629,7 @@ def claim_daily_token(owner_id: int):
                       (DAILY_TOKEN_GIFT, DAILY_TOKEN_GIFT, today, owner_id))
         conn.commit()
         token_cache.invalidate(f"token_balance:{owner_id}")
-        return True, f" {DAILY_TOKEN_GIFT} الماس روزانه دریافت کردید!"
+        return True, f"🎁 {DAILY_TOKEN_GIFT} الماس روزانه دریافت کردید!"
     finally:
         release_conn(conn)
 
@@ -687,7 +694,7 @@ def get_token_stats(owner_id: int) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# دشمن و دوست
+# دشمن و دوست - با Cache
 # ══════════════════════════════════════════════════════════════════════════════
 def add_enemy(owner_id: int, user_id: int, username=None, name=None):
     conn = get_conn()
@@ -816,7 +823,7 @@ def clear_friends(owner_id: int):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# سایلنت
+# سایلنت - بهینه‌شده
 # ══════════════════════════════════════════════════════════════════════════════
 def add_silent_chat(owner_id: int, chat_id: int):
     conn = get_conn()
@@ -1023,7 +1030,7 @@ def check_user_membership(bot, user_id: int) -> tuple:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# جام جهانی
+# جام جهانی - با Cache
 # ══════════════════════════════════════════════════════════════════════════════
 def create_world_cup_challenge(team1: str, team2: str, match_time: str, bet_amount: int):
     conn = get_conn()
@@ -1061,12 +1068,20 @@ def get_active_challenges():
 
 
 def get_challenge(challenge_id: int):
+    cache_key = f"challenge:{challenge_id}"
+    cached = challenge_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM world_cup_challenges WHERE id = %s", (challenge_id,))
         row = c.fetchone()
-        return dict(row) if row else None
+        result = dict(row) if row else None
+        if result:
+            challenge_cache.set(cache_key, result)
+        return result
     finally:
         release_conn(conn)
 
@@ -1095,6 +1110,7 @@ def place_bet(challenge_id: int, user_tg_id: int, owner_id: int, team_choice: st
         
         conn.commit()
         token_cache.invalidate(f"token_balance:{owner_id}")
+        challenge_cache.invalidate(f"challenge:{challenge_id}")
         return True, f"✅ شرط {bet_amount} الماس روی {team_choice} ثبت شد."
     except Exception as e:
         return False, f"❌ خطا: {str(e)}"
@@ -1119,6 +1135,7 @@ def set_challenge_winner(challenge_id: int, winner_team: str):
         c.execute("UPDATE world_cup_challenges SET winner_team = %s, status = 'finished' WHERE id = %s",
                   (winner_team, challenge_id))
         conn.commit()
+        challenge_cache.invalidate(f"challenge:{challenge_id}")
     finally:
         release_conn(conn)
 
@@ -1150,6 +1167,7 @@ def settle_challenge_bets(challenge_id: int):
         conn.commit()
         for r in results:
             token_cache.invalidate(f"token_balance:{r['owner_id']}")
+        challenge_cache.invalidate(f"challenge:{challenge_id}")
         return True, results
     except Exception as e:
         return False, str(e)
@@ -1158,10 +1176,9 @@ def settle_challenge_bets(challenge_id: int):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# قرعه‌کشی - با entry_fee
+# قرعه‌کشی - با entry_fee و Cache
 # ══════════════════════════════════════════════════════════════════════════════
 def create_lottery(chat_id: int, creator_tg_id: int, prize_amount: int, duration_minutes: int, entry_fee: int = 1):
-    """ایجاد قرعه‌کشی با entry_fee قابل تنظیم"""
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -1197,30 +1214,37 @@ def get_active_lotteries():
 
 
 def get_lottery(lottery_id: int):
+    cache_key = f"lottery:{lottery_id}"
+    cached = lottery_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT * FROM lotteries WHERE id = %s", (lottery_id,))
         row = c.fetchone()
-        return dict(row) if row else None
+        result = dict(row) if row else None
+        if result:
+            lottery_cache.set(cache_key, result)
+        return result
     finally:
         release_conn(conn)
 
 
-def join_lottery(lottery_id: int, user_tg_id: int, owner_id: int) -> tuple:
-    """شرکت در قرعه‌کشی - entry_fee از جدول خوانده می‌شود"""
+def join_lottery(lottery_id: int, user_tg_id: int, owner_id: int, entry_fee: int = None) -> tuple:
     conn = get_conn()
     try:
         _ensure_tokens_row(conn, owner_id)
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
-        # خواندن entry_fee از جدول
-        c.execute("SELECT entry_fee FROM lotteries WHERE id = %s AND status = 'active'", (lottery_id,))
-        lottery_row = c.fetchone()
-        if not lottery_row:
-            return False, "❌ قرعه‌کشی فعال نیست یا یافت نشد."
-        
-        entry_fee = lottery_row["entry_fee"]
+        # خواندن entry_fee از جدول اگر مشخص نشده
+        if entry_fee is None:
+            c.execute("SELECT entry_fee FROM lotteries WHERE id = %s AND status = 'active'", (lottery_id,))
+            lottery_row = c.fetchone()
+            if not lottery_row:
+                return False, "❌ قرعه‌کشی فعال نیست یا یافت نشد."
+            entry_fee = lottery_row["entry_fee"]
         
         # بررسی موجودی
         c.execute("SELECT balance FROM tokens WHERE owner_id = %s", (owner_id,))
@@ -1243,6 +1267,7 @@ def join_lottery(lottery_id: int, user_tg_id: int, owner_id: int) -> tuple:
         
         conn.commit()
         token_cache.invalidate(f"token_balance:{owner_id}")
+        lottery_cache.invalidate(f"lottery:{lottery_id}")
         return True, f"✅ با {entry_fee} الماس در قرعه‌کشی شرکت کردید."
     except Exception as e:
         return False, f"❌ خطا: {str(e)}"
@@ -1277,6 +1302,7 @@ def finish_lottery(lottery_id: int, winner_tg_id: int, winner_owner_id: int):
         
         conn.commit()
         token_cache.invalidate(f"token_balance:{winner_owner_id}")
+        lottery_cache.invalidate(f"lottery:{lottery_id}")
         return True, total_prize
     except Exception as e:
         return False, str(e)
@@ -1295,7 +1321,6 @@ def get_expired_lotteries():
 
 
 def update_lottery_entry_fee(lottery_id: int, new_fee: int) -> bool:
-    """به‌روزرسانی هزینه ثبت‌نام قرعه‌کشی"""
     if new_fee < 0:
         return False
     
@@ -1306,6 +1331,8 @@ def update_lottery_entry_fee(lottery_id: int, new_fee: int) -> bool:
                   (new_fee, lottery_id))
         affected = c.rowcount
         conn.commit()
+        if affected > 0:
+            lottery_cache.invalidate(f"lottery:{lottery_id}")
         return affected > 0
     finally:
         release_conn(conn)
