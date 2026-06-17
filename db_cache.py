@@ -1,3 +1,4 @@
+# db_cache.py
 import sqlite3
 import datetime
 from config import CACHE_DB_PATH
@@ -44,11 +45,36 @@ def _init_tables():
         UNIQUE (owner_id, user_id)
     )""")
     
+    # ─── 📋 لیست دشمن ──────────────────────────────────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS enemies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        username TEXT,
+        name TEXT,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (owner_id, user_id)
+    )""")
+    
+    # ─── 📋 لیست دوست ──────────────────────────────────────────────────────────
+    c.execute("""CREATE TABLE IF NOT EXISTS friends (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        username TEXT,
+        name TEXT,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (owner_id, user_id)
+    )""")
+    
     # ─── شاخص‌ها ──────────────────────────────────────────────────────────────
+    c.execute("CREATE INDEX IF NOT EXISTS idx_enemies_owner ON enemies(owner_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_friends_owner ON friends(owner_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_silent_chats_owner ON silent_chats(owner_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_silent_users_owner ON silent_users(owner_id)")
     
     conn.commit()
+    print("✅ جداول دیتابیس کش ایجاد شدند!")
 
 # ─── چنل‌های اجباری ──────────────────────────────────────────────────────────
 def get_forced_channels():
@@ -134,3 +160,97 @@ def is_silent_user(owner_id: int, user_id: int) -> bool:
     c.execute("SELECT 1 FROM silent_users WHERE owner_id = ? AND user_id = ?", 
               (owner_id, user_id))
     return c.fetchone() is not None
+
+# ─── 📋 لیست دشمن ──────────────────────────────────────────────────────────────
+def add_enemy(owner_id: int, user_id: int, username=None, name=None):
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            INSERT OR REPLACE INTO enemies (owner_id, user_id, username, name, added_at) 
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (owner_id, user_id, username, name))
+        conn.commit()
+        print(f"✅ دشمن با ID: {user_id} برای کاربر {owner_id} در کش ذخیره شد")
+        return True
+    except Exception as e:
+        print(f"❌ add_enemy error: {e}")
+        return False
+
+def remove_enemy(owner_id: int, user_id: int) -> bool:
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM enemies WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    conn.commit()
+    return c.rowcount > 0
+
+def get_enemies(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM enemies WHERE owner_id = ? ORDER BY added_at DESC", (owner_id,))
+    return [dict(r) for r in c.fetchall()]
+
+def is_enemy(owner_id: int, user_id: int) -> bool:
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM enemies WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    return c.fetchone() is not None
+
+def clear_enemies(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM enemies WHERE owner_id = ?", (owner_id,))
+    conn.commit()
+
+def get_enemy_count(owner_id: int) -> int:
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM enemies WHERE owner_id = ?", (owner_id,))
+    return c.fetchone()["cnt"]
+
+# ─── 📋 لیست دوست ──────────────────────────────────────────────────────────────
+def add_friend(owner_id: int, user_id: int, username=None, name=None):
+    conn = get_conn()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            INSERT OR REPLACE INTO friends (owner_id, user_id, username, name, added_at) 
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (owner_id, user_id, username, name))
+        conn.commit()
+        print(f"✅ دوست با ID: {user_id} برای کاربر {owner_id} در کش ذخیره شد")
+        return True
+    except Exception as e:
+        print(f"❌ add_friend error: {e}")
+        return False
+
+def remove_friend(owner_id: int, user_id: int) -> bool:
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM friends WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    conn.commit()
+    return c.rowcount > 0
+
+def get_friends(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM friends WHERE owner_id = ? ORDER BY added_at DESC", (owner_id,))
+    return [dict(r) for r in c.fetchall()]
+
+def is_friend(owner_id: int, user_id: int) -> bool:
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM friends WHERE owner_id = ? AND user_id = ?", (owner_id, user_id))
+    return c.fetchone() is not None
+
+def clear_friends(owner_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM friends WHERE owner_id = ?", (owner_id,))
+    conn.commit()
+
+def get_friend_count(owner_id: int) -> int:
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM friends WHERE owner_id = ?", (owner_id,))
+    return c.fetchone()["cnt"]
