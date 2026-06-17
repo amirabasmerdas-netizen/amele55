@@ -1,942 +1,1311 @@
-import threading
-import time
-import telebot
-from telebot import types
-import database as db
-import config
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
+import hashlib
+import os
 import datetime
-import random
+import threading
+import time as _time
+from config import DATABASE_URL
 
-_bot = None
-BOT_USERNAME = None
-OWNER_TG_ID = 8296865861
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🚀 سیستم Cache پیشرفته برای سرعت
+# 🚀 Connection Pooling بهینه‌شده
 # ══════════════════════════════════════════════════════════════════════════════
-class SmartCache:
-    """Cache هوشمند چند منظوره"""
-    def __init__(self):
-        self._data = {}
+_connection_pool = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool():
+    global _connection_pool
+    if _connection_pool is None:
+        with _pool_lock:
+            if _connection_pool is None:
+                try:
+                    _connection_pool = psycopg2.pool.ThreadedConnectionPool(
+                        minconn=5,
+                        maxconn=20,
+                        dsn=DATABASE_URL,
+                        connect_timeout=3,
+                        options="-c statement_timeout=5000 -c idle_in_transaction_session_timeout=10000"
+                    )
+                    print("✅ Connection pool ایجاد شد (min=5, max=20)")
+                except Exception as e:
+                    print(f"❌ خطا در ایجاد pool: {e}")
+                    raise
+    return _connection_pool
+
+
+def get_conn():
+    try:
+        return _get_pool().getconn()
+    except Exception:
+        return psycopg2.connect(DATABASE_URL, connect_timeout=3)
+
+
+def release_conn(conn):
+    try:
+        _get_pool().putconn(conn)
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🚀 Multi-Layer Cache System
+# ══════════════════════════════════════════════════════════════════════════════
+class MultiLayerCache:
+    def __init__(self, max_size=5000, ttl=120):
+        self._cache = {}
         self._timestamps = {}
+        self._access_count = {}
+        self._max_size = max_size
+        self._ttl = ttl
+        self._lock = threading.Lock()
     
     def get(self, key, default=None):
-        if key in self._data and key in self._timestamps:
-            ttl = self._get_ttl(key)
-            if time.time() - self._timestamps[key] < ttl:
-                return self._data[key]
-            else:
-                del self._data[key]
-                del self._timestamps[key]
+        now = _time.time()
+        with self._lock:
+            if key in self._cache:
+                if now - self._timestamps[key] < self._ttl:
+                    self._access_count[key] = self._access_count.get(key, 0) + 1
+                    return self._cache[key]
+                else:
+                    del self._cache[key]
+                    del self._timestamps[key]
+                    self._access_count.pop(key, None)
         return default
     
-    def set(self, key, value):
-        self._data[key] = value
-        self._timestamps[key] = time.time()
+    def set(self, key, value, ttl=None):
+        with self._lock:
+            self._cache[key] = value
+            self._timestamps[key] = _time.time()
+            self._access_count[key] = self._access_count.get(key, 0) + 1
+            
+            while len(self._cache) > self._max_size:
+                min_key = min(self._access_count, key=self._access_count.get)
+                del self._cache[min_key]
+                del self._timestamps[min_key]
+                del self._access_count[min_key]
     
     def invalidate(self, pattern=None):
-        if pattern is None:
-            self._data.clear()
-            self._timestamps.clear()
-        else:
-            keys_to_del = [k for k in self._data if k.startswith(pattern)]
-            for k in keys_to_del:
-                del self._data[k]
-                if k in self._timestamps:
-                    del self._timestamps[k]
-    
-    def _get_ttl(self, key):
-        """TTL بر اساس نوع cache"""
-        if key.startswith("membership_"):
-            return 900  # 15 دقیقه
-        if key.startswith("account_"):
-            return 300  # 5 دقیقه
-        if key.startswith("stats_"):
-            return 60   # 1 دقیقه
-        if key.startswith("challenge_"):
-            return 120  # 2 دقیقه
-        if key.startswith("lottery_"):
-            return 60   # 1 دقیقه
-        return 300      # پیش‌فرض 5 دقیقه
-
-cache = SmartCache()
-
-# State management برای فرم‌های مالک
-_owner_states = {}
-
-
-def get_bot():
-    return _bot
-
-
-def _check_membership_cached(user_id):
-    """بررسی عضویت با cache - فقط یک بار API call"""
-    cache_key = f"membership_{user_id}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-    
-    is_member, missing = db.check_user_membership(_bot, user_id)
-    result = (is_member, missing)
-    cache.set(cache_key, result)
-    return result
-
-
-def _get_account_cached(tg_id):
-    """دریافت حساب با cache"""
-    cache_key = f"account_{tg_id}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-    
-    account = db.get_account_by_tg_id(tg_id)
-    if account:
-        cache.set(cache_key, account)
-    return account
-
-
-def _invalidate_cache(user_id=None):
-    """پاک کردن cache"""
-    if user_id:
-        cache.invalidate(f"membership_{user_id}")
-        cache.invalidate(f"account_{user_id}")
-        cache.invalidate(f"stats_")
-    else:
-        cache.invalidate("membership_")
-        cache.invalidate("account_")
-        cache.invalidate("stats_")
-
-
-def start_token_bot():
-    global _bot, BOT_USERNAME
-
-    if not config.BOT_TOKEN:
-        print("⚠️ BOT_TOKEN تنظیم نشده — ربات الماس غیرفعال است")
-        return
-
-    _bot = telebot.TeleBot(config.BOT_TOKEN, parse_mode="HTML", threaded=True, num_threads=4)
-
-    try:
-        me = _bot.get_me()
-        BOT_USERNAME = me.username
-        print(f"🤖 ربات الماس: @{BOT_USERNAME}")
-    except Exception as e:
-        print(f"❌ خطا در اتصال ربات الماس: {e}")
-        _bot = None
-        return
-
-    import time as _time
-    for attempt in range(3):
-        try:
-            _bot.delete_webhook(drop_pending_updates=True)
-            _time.sleep(2)
-            break
-        except:
-            _time.sleep(2)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # توابع کمکی بهینه‌شده
-    # ══════════════════════════════════════════════════════════════════════════
-    def send_forced_channels_menu(message, missing_channels):
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        for ch in missing_channels:
-            ch_clean = ch.lstrip("@")
-            markup.add(types.InlineKeyboardButton(f"📢 عضویت در {ch}", url=f"https://t.me/{ch_clean}"))
-        markup.add(types.InlineKeyboardButton("✅ بررسی عضویت من", callback_data="check_join"))
-        
-        channels_list = "\n".join([f"🔸 {ch}" for ch in missing_channels])
-        _bot.reply_to(
-            message,
-            "⛔️ <b>ورود به ربات منوط به عضویت در کانال‌های زیر است:</b>\n\n"
-            f"{channels_list}\n\n"
-            "👇 روی هر کانال کلیک کنید و Join بزنید، سپس دکمه «بررسی عضویت من» را بزنید:",
-            reply_markup=markup
-        )
-
-    def require_membership(message):
-        is_member, missing = _check_membership_cached(message.from_user.id)
-        if not is_member:
-            send_forced_channels_menu(message, missing)
-            return False
-        return True
-
-    def _user_keyboard():
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2, input_field_placeholder="یک گزینه را انتخاب کنید:")
-        markup.add("💎 موجودی", "🎁 هدیه روزانه")
-        markup.add("🔗 رفرال", "🛒 خرید الماس")
-        return markup
-
-    def _owner_keyboard():
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2, input_field_placeholder="یک گزینه را انتخاب کنید:")
-        markup.add("💎 موجودی", "🎁 هدیه روزانه")
-        markup.add("🔗 رفرال", "🛒 خرید الماس")
-        markup.add("📢 مدیریت")
-        return markup
-
-    def _admin_panel_keyboard():
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("📢 چنل‌های اجباری", callback_data="admin_channels"),
-            types.InlineKeyboardButton("👥 کاربران", callback_data="admin_users")
-        )
-        markup.add(
-            types.InlineKeyboardButton("🏆 جام جهانی", callback_data="admin_wc"),
-            types.InlineKeyboardButton("🎲 قرعه‌کشی", callback_data="admin_lottery")
-        )
-        markup.add(
-            types.InlineKeyboardButton("💎 انتقال الماس", callback_data="admin_transfer"),
-            types.InlineKeyboardButton("💰 دادن الماس", callback_data="admin_give")
-        )
-        markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel"))
-        return markup
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # /start - بهینه‌شده
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.message_handler(commands=["start"])
-    def cmd_start(message):
-        try:
-            tg_id = message.from_user.id
-            parts = message.text.strip().split()
-            ref_code = parts[1] if len(parts) > 1 else None
-            
-            if ref_code and ref_code.startswith("ref_"):
-                try:
-                    referrer_id = int(ref_code[4:])
-                    threading.Thread(target=_process_referral_async, args=(referrer_id, tg_id), daemon=True).start()
-                except: pass
-
-            is_member, missing = _check_membership_cached(tg_id)
-            if not is_member:
-                send_forced_channels_menu(message, missing)
-                return
-
-            account = _get_account_cached(tg_id)
-            site_url = getattr(config, "SITE_URL", "")
-
-            if not account:
-                markup = types.InlineKeyboardMarkup()
-                if site_url:
-                    markup.add(types.InlineKeyboardButton("🌐 ورود به پنل وب", url=site_url))
-                _bot.reply_to(message, 
-                    "👋 <b>سلام!</b>\n\n"
-                    "برای استفاده از ربات:\n"
-                    "1️⃣ در پنل وب ثبت‌نام کنید\n"
-                    "2️⃣ حساب تلگرام را وصل کنید\n"
-                    "3️⃣ دوباره /start بزنید", 
-                    reply_markup=markup if site_url else None)
-                return
-
-            stats = db.get_token_stats(account["id"])
-            
-            if message.chat.type == 'private':
-                markup = _owner_keyboard() if tg_id == OWNER_TG_ID else _user_keyboard()
+        with self._lock:
+            if pattern is None:
+                self._cache.clear()
+                self._timestamps.clear()
+                self._access_count.clear()
             else:
-                markup = None
+                keys_to_del = [k for k in list(self._cache.keys()) if pattern in k]
+                for k in keys_to_del:
+                    self._cache.pop(k, None)
+                    self._timestamps.pop(k, None)
+                    self._access_count.pop(k, None)
 
-            token_price = getattr(config, 'TOKEN_PRICE_TOMAN', 200)
-            
-            _bot.reply_to(
-                message,
-                f"👋 سلام <b>{account['username']}</b>!\n\n"
-                f"💎 موجودی: <b>{stats['balance']}</b>\n"
-                f"📊 کل دریافتی: <b>{stats['total_earned']}</b>\n\n"
-                f"⚡ هر <b>{config.TOKENS_PER_SESSION} الماس</b> = <b>{config.SESSION_HOURS} ساعت</b> سلف‌بات\n"
-                f"💰 قیمت هر الماس: <b>{token_price} تومان</b>",
-                reply_markup=markup
+
+settings_cache = MultiLayerCache(max_size=3000, ttl=120)
+account_cache = MultiLayerCache(max_size=1000, ttl=600)
+list_cache = MultiLayerCache(max_size=2000, ttl=180)
+token_cache = MultiLayerCache(max_size=1000, ttl=60)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# init_db - با ALTER TABLE برای ستون‌های جدید
+# ══════════════════════════════════════════════════════════════════════════════
+def init_db():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # ─── حساب‌های پنل ────────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS accounts (
+            id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL, telegram_user_id BIGINT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+        # ─── چنل‌های اجباری ──────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS forced_channels (
+            id SERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+        # ─── تنظیمات ─────────────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS settings (
+            owner_id BIGINT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+            PRIMARY KEY (owner_id, key))""")
+
+        # ─── دشمن ─────────────────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS enemies (
+            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+            username TEXT, name TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, user_id))""")
+
+        # ─── دوست ────────────────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS friends (
+            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+            username TEXT, name TEXT, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, user_id))""")
+
+        # ─── سایلنت چت ────────────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS silent_chats (
+            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, chat_id))""")
+
+        # ─── سایلنت کاربر ─────────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS silent_users (
+            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, user_id BIGINT NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (owner_id, user_id))""")
+
+        # ─── پیام‌های ذخیره‌شده ────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS saved_messages (
+            owner_id BIGINT NOT NULL, slot INTEGER NOT NULL, content TEXT, media_path TEXT,
+            saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (owner_id, slot))""")
+
+        # ─── پیام‌های حذف‌شده ─────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS deleted_messages (
+            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT, sender_id BIGINT,
+            sender_name TEXT, message TEXT, media_type TEXT,
+            deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+        # ─── پیام‌های زمان‌بندی‌شده ───────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS scheduled_messages (
+            id SERIAL PRIMARY KEY, owner_id BIGINT NOT NULL, chat_id BIGINT NOT NULL,
+            message TEXT NOT NULL, send_at TIMESTAMP NOT NULL, sent INTEGER DEFAULT 0)""")
+
+        # ─── الماس‌ها ────────────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS tokens (
+            owner_id BIGINT PRIMARY KEY, balance INTEGER DEFAULT 0,
+            last_daily TEXT DEFAULT NULL, total_earned INTEGER DEFAULT 0)""")
+
+        # ─── رفرال‌ها ──────────────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS referrals (
+            id SERIAL PRIMARY KEY, referrer_owner_id BIGINT NOT NULL,
+            referred_tg_id BIGINT NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+        # ─── چالش‌های جام جهانی ──────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS world_cup_challenges (
+            id SERIAL PRIMARY KEY, team1 TEXT NOT NULL, team2 TEXT NOT NULL,
+            match_time TEXT NOT NULL, bet_amount INTEGER NOT NULL,
+            winner_team TEXT DEFAULT NULL, status TEXT DEFAULT 'active',
+            message_id BIGINT DEFAULT NULL, chat_id BIGINT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+        c.execute("""CREATE TABLE IF NOT EXISTS world_cup_bets (
+            id SERIAL PRIMARY KEY, challenge_id BIGINT NOT NULL,
+            user_tg_id BIGINT NOT NULL, owner_id BIGINT NOT NULL,
+            team_choice TEXT NOT NULL, bet_amount INTEGER NOT NULL,
+            result TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (challenge_id, user_tg_id))""")
+
+        # ─── قرعه‌کشی‌ها - با ستون entry_fee جدید ─────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS lotteries (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT NOT NULL,
+            creator_tg_id BIGINT NOT NULL,
+            prize_amount INTEGER NOT NULL,
+            entry_fee INTEGER DEFAULT 1,
+            end_time TIMESTAMP NOT NULL,
+            winner_tg_id BIGINT DEFAULT NULL,
+            status TEXT DEFAULT 'active',
+            message_id BIGINT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+        # ✅ اضافه کردن ستون entry_fee اگر جدول قبلاً وجود داشته باشد
+        try:
+            c.execute("""ALTER TABLE lotteries 
+                         ADD COLUMN IF NOT EXISTS entry_fee INTEGER DEFAULT 1""")
+        except Exception:
+            pass
+
+        c.execute("""CREATE TABLE IF NOT EXISTS lottery_participants (
+            id SERIAL PRIMARY KEY, lottery_id BIGINT NOT NULL, user_tg_id BIGINT NOT NULL,
+            owner_id BIGINT NOT NULL, bet_amount INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (lottery_id, user_tg_id))""")
+
+        # ─── تراکنش‌های الماس ────────────────────────────────────────────────
+        c.execute("""CREATE TABLE IF NOT EXISTS diamond_transactions (
+            id SERIAL PRIMARY KEY, from_owner_id BIGINT NOT NULL, to_owner_id BIGINT NOT NULL,
+            amount INTEGER NOT NULL, type TEXT NOT NULL, description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+
+        # ✅ Index‌های بهینه‌شده
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_accounts_tg ON accounts(telegram_user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(username)",
+            "CREATE INDEX IF NOT EXISTS idx_settings_owner_key ON settings(owner_id, key)",
+            "CREATE INDEX IF NOT EXISTS idx_tokens_owner ON tokens(owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_friends_owner ON friends(owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_enemies_owner ON enemies(owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_wc_bets_challenge ON world_cup_bets(challenge_id)",
+            "CREATE INDEX IF NOT EXISTS idx_lottery_part ON lottery_participants(lottery_id)",
+            "CREATE INDEX IF NOT EXISTS idx_referrals_ref ON referrals(referrer_owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_deleted_owner_time ON deleted_messages(owner_id, deleted_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_scheduled_pending ON scheduled_messages(owner_id, sent, send_at)",
+            "CREATE INDEX IF NOT EXISTS idx_forced_channels_username ON forced_channels(username)",
+            "CREATE INDEX IF NOT EXISTS idx_world_cup_challenges_status ON world_cup_challenges(status)",
+            "CREATE INDEX IF NOT EXISTS idx_lotteries_status ON lotteries(status, end_time)",
+        ]
+        
+        for idx_sql in indexes:
+            try:
+                c.execute(idx_sql)
+            except Exception:
+                pass
+
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# مدیریت حساب
+# ══════════════════════════════════════════════════════════════════════════════
+def create_account(username: str, password: str):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute(
+            "INSERT INTO accounts (username, password_hash) VALUES (%s, %s) RETURNING id",
+            (username.strip(), _hash_pw(password)),
+        )
+        new_id = c.fetchone()["id"]
+        conn.commit()
+        _init_tokens_by_id(new_id)
+        return new_id
+    except Exception:
+        return None
+    finally:
+        release_conn(conn)
+
+
+def _init_tokens_by_id(owner_id: int):
+    from config import WELCOME_TOKENS
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO tokens (owner_id, balance, total_earned) VALUES (%s, %s, %s) ON CONFLICT (owner_id) DO NOTHING",
+            (owner_id, WELCOME_TOKENS, WELCOME_TOKENS),
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        release_conn(conn)
+
+
+def verify_account(username: str, password: str):
+    cache_key = f"verify:{username}:{_hash_pw(password)}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT id FROM accounts WHERE username = %s AND password_hash = %s",
+                  (username.strip(), _hash_pw(password)))
+        row = c.fetchone()
+        result = row["id"] if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
+    finally:
+        release_conn(conn)
+
+
+def get_account(owner_id: int):
+    cache_key = f"account:{owner_id}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE id = %s", (owner_id,))
+        row = c.fetchone()
+        result = dict(row) if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
+    finally:
+        release_conn(conn)
+
+
+def get_account_by_username(username: str):
+    cache_key = f"account_user:{username}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE username = %s",
+                  (username.strip(),))
+        row = c.fetchone()
+        result = dict(row) if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
+    finally:
+        release_conn(conn)
+
+
+def get_account_by_tg_id(tg_id: int):
+    cache_key = f"account_tg:{tg_id}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT id, username, telegram_user_id, created_at FROM accounts WHERE telegram_user_id = %s",
+                  (tg_id,))
+        row = c.fetchone()
+        result = dict(row) if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
+    finally:
+        release_conn(conn)
+
+
+def get_all_accounts():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT id, username, created_at FROM accounts ORDER BY created_at")
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def account_exists():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT EXISTS(SELECT 1 FROM accounts LIMIT 1) as exists")
+        return c.fetchone()["exists"]
+    finally:
+        release_conn(conn)
+
+
+def save_telegram_user_id(owner_id: int, tg_user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE accounts SET telegram_user_id = %s WHERE id = %s", (tg_user_id, owner_id))
+        conn.commit()
+        account_cache.invalidate(f"account:{owner_id}")
+    finally:
+        release_conn(conn)
+
+
+def get_telegram_id_by_owner(owner_id: int):
+    cache_key = f"tg_id:{owner_id}"
+    cached = account_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT telegram_user_id FROM accounts WHERE id = %s", (owner_id,))
+        row = c.fetchone()
+        result = row["telegram_user_id"] if row else None
+        if result:
+            account_cache.set(cache_key, result)
+        return result
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# تنظیمات
+# ═════════════════════════════════════════════════════════════════════════════
+SETTING_DEFAULTS = {
+    "self_bot_active": "0", "secretary_active": "0", "anti_delete_active": "0",
+    "anti_link_active": "0", "auto_seen_active": "0", "auto_reaction_active": "0",
+    "private_lock_active": "0", "enemy_reply_active": "0", "auto_save_media": "0",
+    "clock_name_active": "0", "clock_bio_active": "0", "selected_font": "0",
+    "secretary_message": "در حال حاضر در دسترس نیستم.", "auto_reaction_emoji": "❤️",
+    "spam_active": "0", "channel_save_active": "0", "spam_delay": "2",
+    "session_data": "", "logged_in": "0",
+}
+
+
+def init_user_settings(owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        for key, value in SETTING_DEFAULTS.items():
+            c.execute(
+                "INSERT INTO settings (owner_id, key, value) VALUES (%s, %s, %s) ON CONFLICT (owner_id, key) DO NOTHING",
+                (owner_id, key, value),
             )
-
-            if message.chat.type == 'private':
-                sponsors = getattr(config, 'SPONSORS', [])
-                if sponsors:
-                    sponsors_text = "🤝 <b>اسپانسرهای رسمی پروژه:</b>\n"
-                    for sp in sponsors:
-                        sponsors_text += f"🔸 @{sp['username']}\n"
-                    sponsors_text += f"\n👑 <b>مالک و پشتیبانی:</b> @{config.OWNER_USERNAME}"
-                    _bot.send_message(message.chat.id, sponsors_text)
-        except Exception as e:
-            print(f"❌ خطا در cmd_start: {e}")
-
-    def _process_referral_async(referrer_id, tg_id):
-        try:
-            if db.process_referral(referrer_id, tg_id):
-                referrer_tg = db.get_telegram_id_by_owner(referrer_id)
-                if referrer_tg and _bot:
-                    _bot.send_message(referrer_tg, 
-                        f"🎉 یک نفر با لینک شما عضو شد!\n"
-                        f"<b>+{config.REFERRAL_TOKENS} الماس</b> دریافت کردید 💎")
-        except Exception as e:
-            print(f"❌ خطا در رفرال: {e}")
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # Callback: بررسی عضویت
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.callback_query_handler(func=lambda call: call.data == "check_join")
-    def callback_check_join(call):
-        try:
-            cache.invalidate(f"membership_{call.from_user.id}")
-            is_member, missing = _check_membership_cached(call.from_user.id)
-            if is_member:
-                _bot.answer_callback_query(call.id, "عضویت تأیید شد! ✅")
-                try: 
-                    _bot.delete_message(call.message.chat.id, call.message.message_id)
-                except: 
-                    pass
-                cmd_start(call.message)
-            else:
-                _bot.answer_callback_query(call.id, f"هنوز در {len(missing)} کانال عضو نشده‌اید! ❌", show_alert=True)
-        except Exception as e:
-            print(f"❌ خطا در callback_check_join: {e}")
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # دکمه‌های منوی اصلی
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.message_handler(func=lambda m: m.text == "💎 موجودی", chat_types=['private'])
-    def cmd_balance(message):
-        try:
-            if not require_membership(message): return
-            account = _get_account_cached(message.from_user.id)
-            if not account:
-                return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
-            
-            stats = db.get_token_stats(account["id"])
-            ref_count = db.get_referral_count(account["id"])
-            token_price = getattr(config, 'TOKEN_PRICE_TOMAN', 200)
-            
-            _bot.reply_to(message,
-                f"💎 <b>موجودی الماس</b>\n\n"
-                f"💰 فعلی: <b>{stats['balance']}</b>\n"
-                f"📊 کل: <b>{stats['total_earned']}</b>\n"
-                f"👥 رفرال: <b>{ref_count}</b> نفر\n"
-                f"💵 قیمت هر الماس: <b>{token_price} تومان</b>",
-                reply_markup=_owner_keyboard() if message.from_user.id == OWNER_TG_ID else _user_keyboard())
-        except Exception as e:
-            print(f"❌ خطا در cmd_balance: {e}")
-
-    @_bot.message_handler(func=lambda m: m.text == "🎁 هدیه روزانه", chat_types=['private'])
-    def cmd_daily(message):
-        try:
-            if not require_membership(message): return
-            account = _get_account_cached(message.from_user.id)
-            if not account:
-                return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
-            
-            success, msg = db.claim_daily_token(account["id"])
-            cache.invalidate(f"account_{message.from_user.id}")
-            
-            if success:
-                stats = db.get_token_stats(account["id"])
-                _bot.reply_to(message, f"{msg}\n\n💎 موجودی جدید: <b>{stats['balance']}</b>", reply_markup=_user_keyboard())
-            else:
-                _bot.reply_to(message, msg, reply_markup=_user_keyboard())
-        except Exception as e:
-            print(f"❌ خطا در cmd_daily: {e}")
-
-    @_bot.message_handler(func=lambda m: m.text == "🔗 رفرال", chat_types=['private'])
-    def cmd_referral(message):
-        try:
-            if not require_membership(message): return
-            account = _get_account_cached(message.from_user.id)
-            if not account:
-                return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
-            
-            link = f"https://t.me/{BOT_USERNAME}?start=ref_{account['id']}"
-            ref_count = db.get_referral_count(account["id"])
-            token_price = getattr(config, 'TOKEN_PRICE_TOMAN', 200)
-            referral_value = config.REFERRAL_TOKENS * token_price
-            
-            _bot.reply_to(message,
-                f"🔗 <b>لینک رفرال شما:</b>\n<code>{link}</code>\n\n"
-                f"👥 تعداد: <b>{ref_count}</b>\n"
-                f"🎁 پاداش: <b>{config.REFERRAL_TOKENS} الماس</b> (معادل {referral_value} تومان)",
-                reply_markup=_user_keyboard())
-        except Exception as e:
-            print(f"❌ خطا در cmd_referral: {e}")
-
-    @_bot.message_handler(func=lambda m: m.text == "🛒 خرید الماس", chat_types=['private'])
-    def cmd_buy(message):
-        try:
-            if not require_membership(message): return
-            account = _get_account_cached(message.from_user.id)
-            username_txt = account["username"] if account else str(message.from_user.id)
-            
-            markup = types.InlineKeyboardMarkup(row_width=1)
-            markup.add(types.InlineKeyboardButton("📩 خرید از مالک (@Amele55)", url="https://t.me/Amele55"))
-            for sp in getattr(config, 'SPONSORS', []):
-                markup.add(types.InlineKeyboardButton(f"🤝 {sp['name']}: @{sp['username']}", url=f"https://t.me/{sp['username']}"))
-
-            token_price = getattr(config, 'TOKEN_PRICE_TOMAN', 200)
-            _bot.reply_to(message,
-                f"🛒 <b>خرید الماس</b>\n\n"
-                f"💰 قیمت هر الماس: <b>{token_price} تومان</b>\n"
-                f"👤 یوزرنیم پنل شما: <b>{username_txt}</b>\n\n"
-                f"برای خرید، روی دکمه «خرید از مالک» کلیک کنید.",
-                reply_markup=markup)
-        except Exception as e:
-            print(f"❌ خطا در cmd_buy: {e}")
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # 📢 پنل مدیریت مالک
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.message_handler(func=lambda m: m.text == "📢 مدیریت", chat_types=['private'])
-    def cmd_admin_panel(message):
-        if message.from_user.id != OWNER_TG_ID: 
-            return
-        _bot.reply_to(message, 
-            "📢 <b>پنل مدیریت مالک</b>\n\nیکی از گزینه‌های زیر را انتخاب کنید:",
-            reply_markup=_admin_panel_keyboard())
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # 🎯 Callback handler پنل مدیریت - اصلاح‌شده
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.callback_query_handler(func=lambda call: call.data.startswith("admin_") or call.data.startswith("rmch_") or call.data.startswith("wcwin_") or call.data.startswith("bet_wc_") or call.data.startswith("join_lottery_"))
-    def callback_admin(call):
-        if call.from_user.id != OWNER_TG_ID:
-            return _bot.answer_callback_query(call.id, "❌ فقط مالک دسترسی دارد", show_alert=True)
-        
-        try:
-            data = call.data
-            
-            # ─── بازگشت به پنل اصلی ────────────────────────────────────────
-            if data == "admin_panel" or data == "admin_back":
-                _bot.edit_message_text(
-                    "📢 <b>پنل مدیریت مالک</b>\n\nیکی از گزینه‌های زیر را انتخاب کنید:",
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=_admin_panel_keyboard()
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── چنل‌های اجباری ────────────────────────────────────────────
-            elif data == "admin_channels":
-                channels = db.get_forced_channels()
-                markup = types.InlineKeyboardMarkup(row_width=1)
-                if channels:
-                    text = "📢 <b>چنل‌های اجباری فعلی:</b>\n\n"
-                    for ch in channels:
-                        text += f"🔸 <code>{ch}</code>\n"
-                        # ✅ اصلاح: فقط یوزرنیم بدون @ رو برای callback بفرست
-                        ch_clean = ch.lstrip("@")
-                        markup.add(types.InlineKeyboardButton(f"❌ حذف {ch}", callback_data=f"rmch_{ch_clean}"))
-                else:
-                    text = "📋 لیست چنل‌ها خالی است.\n\n"
-                text += "\nبرای افزودن چنل جدید از دکمه زیر استفاده کنید:"
-                markup.add(types.InlineKeyboardButton("➕ افزودن چنل جدید", callback_data="addch_prompt"))
-                markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel"))
-                _bot.edit_message_text(
-                    text,
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── حذف چنل ────────────────────────────────────────────────────
-            elif data.startswith("rmch_"):
-                ch = data[5:]  # یوزرنیم بدون @
-                if not ch.startswith("@"):
-                    ch = "@" + ch
-                if db.remove_forced_channel(ch):
-                    cache.invalidate("membership_")
-                    _bot.answer_callback_query(call.id, f"✅ چنل {ch} حذف شد")
-                    # بازگشت به لیست چنل‌ها
-                    call.data = "admin_channels"
-                    callback_admin(call)
-                else:
-                    _bot.answer_callback_query(call.id, "❌ خطا در حذف")
-                return
-            
-            # ─── افزودن چنل ──────────────────────────────────────────────────
-            elif data == "addch_prompt":
-                _owner_states[call.from_user.id] = {"state": "waiting_channel"}
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_panel"))
-                _bot.edit_message_text(
-                    "📝 آیدی چنل را ارسال کنید (با @ شروع شود):\n\nمثال: <code>@mychannel</code>",
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── کاربران ──────────────────────────────────────────────────────
-            elif data == "admin_users":
-                accounts = db.get_all_accounts()
-                if not accounts:
-                    text = "هیچ کاربری ثبت نشده."
-                else:
-                    lines = [f"👥 <b>کاربران ({len(accounts)} نفر):</b>\n\n"]
-                    for acc in accounts[:30]:
-                        bal = db.get_token_balance(acc["id"])
-                        lines.append(f"• <b>{acc['username']}</b> — 💎{bal}")
-                    text = "\n".join(lines)
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel"))
-                _bot.edit_message_text(
-                    text,
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── جام جهانی ────────────────────────────────────────────────────
-            elif data == "admin_wc":
-                markup = types.InlineKeyboardMarkup(row_width=1)
-                markup.add(types.InlineKeyboardButton("➕ ایجاد چالش جدید", callback_data="wc_new"))
-                markup.add(types.InlineKeyboardButton("📋 چالش‌های فعال", callback_data="wc_list"))
-                markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel"))
-                _bot.edit_message_text(
-                    "🏆 <b>مدیریت چالش‌های جام جهانی</b>\n\nیک گزینه را انتخاب کنید:",
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── ایجاد چالش جدید ────────────────────────────────────────────
-            elif data == "wc_new":
-                _owner_states[call.from_user.id] = {"state": "wc_team1", "data": {}}
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_wc"))
-                _bot.edit_message_text(
-                    "🏆 <b>ایجاد چالش جدید</b>\n\n"
-                    "📝 مرحله ۱ از ۴:\nنام <b>تیم اول</b> را ارسال کنید:\n\nمثال: <code>ایران</code>",
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── لیست چالش‌های فعال ─────────────────────────────────────────
-            elif data == "wc_list":
-                challenges = db.get_active_challenges()
-                if not challenges:
-                    text = "📋 هیچ چالش فعالی وجود ندارد."
-                    markup = types.InlineKeyboardMarkup()
-                    markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_wc"))
-                else:
-                    text = "🏆 <b>چالش‌های فعال:</b>\n\n"
-                    markup = types.InlineKeyboardMarkup(row_width=2)
-                    for c in challenges:
-                        text += f"<b>ID {c['id']}:</b> {c['team1']} vs {c['team2']}\n"
-                        text += f"⏰ {c['match_time']} | 💎 {c['bet_amount']}\n\n"
-                        markup.add(
-                            types.InlineKeyboardButton(f"✅ {c['team1']}", callback_data=f"wcwin_{c['id']}_{c['team1']}"),
-                            types.InlineKeyboardButton(f"✅ {c['team2']}", callback_data=f"wcwin_{c['id']}_{c['team2']}")
-                        )
-                    markup.add(types.InlineKeyboardButton("🔙 بازگشت", callback_data="admin_wc"))
-                _bot.edit_message_text(
-                    text,
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── تعیین برنده چالش ────────────────────────────────────────────
-            elif data.startswith("wcwin_"):
-                parts = data.split("_", 2)
-                challenge_id = int(parts[1])
-                winner_team = parts[2]
-                db.set_challenge_winner(challenge_id, winner_team)
-                success, results = db.settle_challenge_bets(challenge_id)
-                if success:
-                    won_count = sum(1 for r in results if r["result"] == "won")
-                    lost_count = sum(1 for r in results if r["result"] == "lost")
-                    _bot.answer_callback_query(call.id, f"✅ برنده: {winner_team}\n🏆 {won_count} برنده | ❌ {lost_count} بازنده", show_alert=True)
-                    for r in results:
-                        if r["result"] == "won":
-                            try:
-                                _bot.send_message(r["user_tg_id"], f"🎉 تبریک! شرط شما درست بود.\n💎 <b>{r['amount']} الماس</b> دریافت کردید.")
-                            except: 
-                                pass
-                else:
-                    _bot.answer_callback_query(call.id, f"❌ خطا: {results}", show_alert=True)
-                return
-            
-            # ─── قرعه‌کشی ────────────────────────────────────────────────────
-            elif data == "admin_lottery":
-                _owner_states[call.from_user.id] = {"state": "lottery_amount"}
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_panel"))
-                _bot.edit_message_text(
-                    "🎲 <b>ایجاد قرعه‌کشی گروهی</b>\n\n"
-                    "💎 مبلغ جایزه را ارسال کنید (الماس):\n\nمثال: <code>100</code>\n\n"
-                    "⚠️ قرعه‌کشی در گروه <code>@amelselfgap</code> ایجاد می‌شود.",
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── انتقال الماس ─────────────────────────────────────────────────
-            elif data == "admin_transfer":
-                _owner_states[call.from_user.id] = {"state": "transfer_user", "data": {}}
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_panel"))
-                _bot.edit_message_text(
-                    "💎 <b>انتقال الماس (از طرف سیستم)</b>\n\n"
-                    "📝 یوزرنیم کاربر مقصد را ارسال کنید:\n\nمثال: <code>ali</code>",
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            # ─── دادن الماس ──────────────────────────────────────────────────
-            elif data == "admin_give":
-                _owner_states[call.from_user.id] = {"state": "give_user", "data": {}}
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("❌ لغو", callback_data="admin_panel"))
-                _bot.edit_message_text(
-                    "💰 <b>دادن الماس به کاربر</b>\n\n"
-                    "📝 یوزرنیم کاربر را ارسال کنید:\n\nمثال: <code>ali</code>",
-                    chat_id=call.message.chat.id,
-                    message_id=call.message.message_id,
-                    reply_markup=markup
-                )
-                _bot.answer_callback_query(call.id)
-                return
-            
-            else:
-                _bot.answer_callback_query(call.id, "❌ گزینه نامعتبر")
-        
-        except Exception as e:
-            print(f"❌ خطا در callback_admin: {e}")
-            try:
-                _bot.answer_callback_query(call.id, f"❌ خطا: {str(e)[:100]}", show_alert=True)
-            except: 
-                pass
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # 📨 State handler - اصلاح‌شده
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.message_handler(func=lambda m: m.from_user.id == OWNER_TG_ID and m.from_user.id in _owner_states, chat_types=['private'])
-    def handle_owner_state(message):
-        try:
-            state_data = _owner_states[message.from_user.id]
-            state = state_data["state"]
-            text = message.text.strip()
-            
-            if state == "waiting_channel":
-                if not text.startswith("@"):
-                    text = "@" + text
-                if db.add_forced_channel(text):
-                    cache.invalidate("membership_")
-                    _bot.reply_to(message, f"✅ چنل <b>{text}</b> اضافه شد.", reply_markup=_owner_keyboard())
-                else:
-                    _bot.reply_to(message, f"⚠️ خطا یا تکراری است.", reply_markup=_owner_keyboard())
-                _owner_states.pop(message.from_user.id, None)
-            
-            elif state == "wc_team1":
-                state_data["data"]["team1"] = text
-                state_data["state"] = "wc_team2"
-                _bot.reply_to(message, f"✅ تیم اول: <b>{text}</b>\n\n📝 مرحله ۲ از ۴:\nنام <b>تیم دوم</b> را ارسال کنید:")
-            
-            elif state == "wc_team2":
-                state_data["data"]["team2"] = text
-                state_data["state"] = "wc_time"
-                _bot.reply_to(message, f"✅ تیم دوم: <b>{text}</b>\n\n📝 مرحله ۳ از ۴:\n⏰ ساعت بازی را ارسال کنید:\n\nمثال: <code>20:30</code>")
-            
-            elif state == "wc_time":
-                state_data["data"]["time"] = text
-                state_data["state"] = "wc_bet"
-                _bot.reply_to(message, f"✅ ساعت: <b>{text}</b>\n\n📝 مرحله ۴ از ۴:\n💎 مبلغ شرط (الماس) را ارسال کنید:\n\nمثال: <code>10</code>")
-            
-            elif state == "wc_bet":
-                try:
-                    bet_amount = int(text)
-                except:
-                    return _bot.reply_to(message, "❌ مبلغ باید عدد باشد. دوباره تلاش کنید:")
-                
-                data = state_data["data"]
-                challenge_id = db.create_world_cup_challenge(data["team1"], data["team2"], data["time"], bet_amount)
-                
-                group = getattr(config, 'WORLD_CUP_GROUP', '@amelselfgap')
-                markup = types.InlineKeyboardMarkup(row_width=2)
-                markup.add(
-                    types.InlineKeyboardButton(f"🔵 {data['team1']}", callback_data=f"bet_wc_{challenge_id}_{data['team1']}"),
-                    types.InlineKeyboardButton(f"🔴 {data['team2']}", callback_data=f"bet_wc_{challenge_id}_{data['team2']}")
-                )
-                
-                try:
-                    msg = _bot.send_message(group,
-                        f"⚽️ <b>چالش جام جهانی!</b>\n\n"
-                        f"🆚 <b>{data['team1']}</b> در برابر <b>{data['team2']}</b>\n"
-                        f"⏰ ساعت: <b>{data['time']}</b>\n"
-                        f"💎 مبلغ شرط: <b>{bet_amount} الماس</b>\n\n"
-                        f"کدام تیم برنده می‌شود؟ شرط ببندید!",
-                        reply_markup=markup)
-                    db.update_challenge_message(challenge_id, msg.message_id, msg.chat.id)
-                    _bot.reply_to(message, 
-                        f"✅ چالش با موفقیت ایجاد شد!\n\n"
-                        f"🆚 {data['team1']} vs {data['team2']}\n"
-                        f"⏰ {data['time']} | 💎 {bet_amount}\n"
-                        f"📢 ID چالش: <code>{challenge_id}</code>",
-                        reply_markup=_owner_keyboard())
-                except Exception as e:
-                    _bot.reply_to(message, f"❌ خطا در ارسال به گروه: {e}\nمطمئن شوید ربات در {group} ادمین است.", reply_markup=_owner_keyboard())
-                
-                _owner_states.pop(message.from_user.id, None)
-            
-            elif state == "lottery_amount":
-                try:
-                    prize = int(text)
-                except:
-                    return _bot.reply_to(message, "❌ مبلغ باید عدد باشد:")
-                
-                group = getattr(config, 'WORLD_CUP_GROUP', '@amelselfgap')
-                duration = getattr(config, 'LOTTERY_DURATION_MINUTES', 5)
-                lottery_id = db.create_lottery(0, OWNER_TG_ID, prize, duration)
-                
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("🎲 شرکت در قرعه‌کشی (۱ الماس)", callback_data=f"join_lottery_{lottery_id}"))
-                
-                end_time = datetime.datetime.now() + datetime.timedelta(minutes=duration)
-                end_time_str = end_time.strftime("%H:%M")
-                
-                try:
-                    msg = _bot.send_message(group,
-                        f"🎉 <b>قرعه‌کشی ویژه!</b>\n\n"
-                        f"💎 مبلغ جایزه: <b>{prize} الماس</b>\n"
-                        f"⏰ زمان پایان: <b>{end_time_str}</b>\n\n"
-                        f"برای شرکت، روی دکمه زیر کلیک کنید!\n"
-                        f"(هزینه شرکت: ۱ الماس)",
-                        reply_markup=markup)
-                    db.update_lottery_message(lottery_id, msg.message_id)
-                    _bot.reply_to(message, 
-                        f"✅ قرعه‌کشی ایجاد شد!\n\n"
-                        f"💎 جایزه: {prize} الماس\n"
-                        f"⏰ پایان: {end_time_str}\n"
-                        f"📢 ID: <code>{lottery_id}</code>",
-                        reply_markup=_owner_keyboard())
-                    
-                    threading.Timer(duration * 60, _finish_lottery, args=[lottery_id, group]).start()
-                except Exception as e:
-                    _bot.reply_to(message, f"❌ خطا: {e}", reply_markup=_owner_keyboard())
-                
-                _owner_states.pop(message.from_user.id, None)
-            
-            elif state == "transfer_user":
-                state_data["data"]["username"] = text.lstrip("@")
-                state_data["state"] = "transfer_amount"
-                _bot.reply_to(message, f"📝 کاربر: <b>{text}</b>\n\n💎 مبلغ الماس را ارسال کنید:")
-            
-            elif state == "transfer_amount":
-                try:
-                    amount = int(text)
-                except:
-                    return _bot.reply_to(message, "❌ مبلغ باید عدد باشد:")
-                
-                username = state_data["data"]["username"]
-                to_account = db.get_account_by_username(username)
-                if not to_account:
-                    _bot.reply_to(message, f"❌ کاربر '{username}' یافت نشد.", reply_markup=_owner_keyboard())
-                    _owner_states.pop(message.from_user.id, None)
-                    return
-                
-                db.add_tokens(to_account["id"], amount)
-                new_balance = db.get_token_balance(to_account["id"])
-                
-                to_tg_id = db.get_telegram_id_by_owner(to_account["id"])
-                if to_tg_id:
-                    try:
-                        _bot.send_message(to_tg_id, f"🎁 <b>{amount} الماس</b> از طرف سیستم دریافت کردید!\n💎 موجودی جدید: <b>{new_balance}</b>")
-                    except: 
-                        pass
-                
-                _bot.reply_to(message, 
-                    f"✅ <b>{amount} الماس</b> به <b>{to_account['username']}</b> داده شد.\n💎 موجودی جدید: <b>{new_balance}</b>",
-                    reply_markup=_owner_keyboard())
-                _owner_states.pop(message.from_user.id, None)
-            
-            elif state == "give_user":
-                state_data["data"]["username"] = text.lstrip("@")
-                state_data["state"] = "give_amount"
-                _bot.reply_to(message, f"📝 کاربر: <b>{text}</b>\n\n💎 مبلغ الماس را ارسال کنید:")
-            
-            elif state == "give_amount":
-                try:
-                    amount = int(text)
-                except:
-                    return _bot.reply_to(message, "❌ مبلغ باید عدد باشد:")
-                
-                username = state_data["data"]["username"]
-                account = db.get_account_by_username(username)
-                if not account:
-                    _bot.reply_to(message, f"❌ کاربر '{username}' یافت نشد.", reply_markup=_owner_keyboard())
-                    _owner_states.pop(message.from_user.id, None)
-                    return
-                
-                db.add_tokens(account["id"], amount)
-                new_balance = db.get_token_balance(account["id"])
-                token_price = getattr(config, 'TOKEN_PRICE_TOMAN', 200)
-                
-                tg_id = db.get_telegram_id_by_owner(account["id"])
-                if tg_id:
-                    try:
-                        _bot.send_message(tg_id, f"🎁 <b>{amount} الماس</b> از طرف مالک دریافت کردید!\n💎 موجودی جدید: <b>{new_balance}</b>")
-                    except: 
-                        pass
-                
-                _bot.reply_to(message, 
-                    f"✅ <b>{amount}</b> الماس به <b>{account['username']}</b> داده شد.\n"
-                    f"💎 موجودی جدید: <b>{new_balance}</b> (معادل {new_balance * token_price} تومان)",
-                    reply_markup=_owner_keyboard())
-                _owner_states.pop(message.from_user.id, None)
-        
-        except Exception as e:
-            print(f"❌ خطا در handle_owner_state: {e}")
-            _bot.reply_to(message, f"❌ خطا: {e}", reply_markup=_owner_keyboard())
-            _owner_states.pop(message.from_user.id, None)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # 🎲 Callback: شرکت در قرعه‌کشی
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.callback_query_handler(func=lambda call: call.data.startswith("join_lottery_"))
-    def callback_join_lottery(call):
-        try:
-            lottery_id = int(call.data.split("_")[2])
-            lottery = db.get_lottery(lottery_id)
-            
-            if not lottery or lottery["status"] != "active":
-                return _bot.answer_callback_query(call.id, "❌ این قرعه‌کشی فعال نیست یا به پایان رسیده.", show_alert=True)
-            
-            account = _get_account_cached(call.from_user.id)
-            if not account:
-                return _bot.answer_callback_query(call.id, "❌ ابتدا در پنل وب ثبت‌نام کنید.", show_alert=True)
-            
-            success, msg = db.join_lottery(lottery_id, call.from_user.id, account["id"], 1)
-            _bot.answer_callback_query(call.id, msg, show_alert=True)
-        except Exception as e:
-            print(f"❌ خطا در callback_join_lottery: {e}")
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # 🏆 Callback: شرط‌بندی جام جهانی
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.callback_query_handler(func=lambda call: call.data.startswith("bet_wc_"))
-    def callback_bet_wc(call):
-        try:
-            parts = call.data.split("_", 3)
-            challenge_id = int(parts[2])
-            team_choice = parts[3]
-            
-            cache_key = f"challenge_{challenge_id}"
-            challenge = cache.get(cache_key)
-            if challenge is None:
-                challenge = db.get_challenge(challenge_id)
-                if challenge:
-                    cache.set(cache_key, challenge)
-            
-            if not challenge or challenge["status"] != "active":
-                return _bot.answer_callback_query(call.id, "❌ این چالش فعال نیست.", show_alert=True)
-            
-            account = _get_account_cached(call.from_user.id)
-            if not account:
-                return _bot.answer_callback_query(call.id, "❌ ابتدا در پنل وب ثبت‌نام کنید.", show_alert=True)
-            
-            success, msg = db.place_bet(challenge_id, call.from_user.id, account["id"], team_choice, challenge["bet_amount"])
-            _bot.answer_callback_query(call.id, msg, show_alert=True)
-        except Exception as e:
-            print(f"❌ خطا در callback_bet_wc: {e}")
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # دستورات متنی قدیمی مالک
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.message_handler(commands=["addchannel", "removechannel", "give", "users", "wc_create", "wc_winner", "lottery", "transfer"])
-    def cmd_text_commands(message):
-        if message.from_user.id != OWNER_TG_ID: 
-            return
-        _bot.reply_to(message, 
-            "📢 تمام دستورات مدیریتی به پنل دکمه‌ای منتقل شدند.\n\n"
-            "روی دکمه <b>📢 مدیریت</b> کلیک کنید.",
-            reply_markup=_owner_keyboard())
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # ✅ پیام‌های ناشناخته
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.message_handler(func=lambda m: True, chat_types=['private'])
-    def cmd_unknown(message):
-        try:
-            account = _get_account_cached(message.from_user.id)
-            if not account: 
-                return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.", reply_markup=_user_keyboard())
-            
-            kb = _owner_keyboard() if message.from_user.id == OWNER_TG_ID else _user_keyboard()
-            _bot.reply_to(message, "⚠️ دستور نامعتبر. از دکمه‌های زیر استفاده کنید:", reply_markup=kb)
-        except Exception as e:
-            print(f"❌ خطا در cmd_unknown: {e}")
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # Polling
-    # ══════════════════════════════════════════════════════════════════════════
-    def _polling_loop():
-        import time as _t
-        while True:
-            try:
-                _bot.infinity_polling(
-                    timeout=20, 
-                    long_polling_timeout=15, 
-                    restart_on_change=False, 
-                    skip_pending=True
-                )
-            except Exception as e:
-                if "409" in str(e):
-                    _t.sleep(10)
-                    try: 
-                        _bot.delete_webhook(drop_pending_updates=True)
-                    except: 
-                        pass
-                else:
-                    print(f"⚠️ خطای polling: {e}")
-                    _t.sleep(3)
-
-    t = threading.Thread(target=_polling_loop, daemon=True)
-    t.start()
-    print(f"✅ ربات الماس @{BOT_USERNAME} استارت شد (threaded=True, 4 threads)")
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        release_conn(conn)
+    _init_tokens_by_id(owner_id)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# پایان قرعه‌کشی
-# ══════════════════════════════════════════════════════════════════════════════
-def _finish_lottery(lottery_id, group_chat):
+def get_setting(owner_id: int, key: str, default=None):
+    cache_key = f"setting:{owner_id}:{key}"
+    cached = settings_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
     try:
-        lottery = db.get_lottery(lottery_id)
-        if not lottery or lottery["status"] != "active":
-            return
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT value FROM settings WHERE owner_id = %s AND key = %s", (owner_id, key))
+        row = c.fetchone()
+        value = row["value"] if row else SETTING_DEFAULTS.get(key, default)
+        settings_cache.set(cache_key, value)
+        return value
+    finally:
+        release_conn(conn)
+
+
+def set_setting(owner_id: int, key: str, value):
+    cache_key = f"setting:{owner_id}:{key}"
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO settings (owner_id, key, value) VALUES (%s, %s, %s)
+                     ON CONFLICT (owner_id, key) DO UPDATE SET value = EXCLUDED.value""",
+                  (owner_id, key, str(value)))
+        conn.commit()
+        settings_cache.set(cache_key, str(value))
+    finally:
+        release_conn(conn)
+
+
+def toggle_setting(owner_id: int, key: str):
+    current = get_setting(owner_id, key, "0")
+    new_val = "0" if current == "1" else "1"
+    set_setting(owner_id, key, new_val)
+    return new_val == "1"
+
+
+def get_all_logged_in_users():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT owner_id FROM settings WHERE key = 'logged_in' AND value = '1'")
+        return [r["owner_id"] for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# سیستم الماس
+# ══════════════════════════════════════════════════════════════════════════════
+def _ensure_tokens_row(conn, owner_id: int):
+    c = conn.cursor()
+    c.execute("INSERT INTO tokens (owner_id, balance, total_earned) VALUES (%s, 0, 0) ON CONFLICT (owner_id) DO NOTHING",
+              (owner_id,))
+    conn.commit()
+
+
+def get_token_balance(owner_id: int) -> int:
+    cache_key = f"token_balance:{owner_id}"
+    cached = token_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT balance FROM tokens WHERE owner_id = %s", (owner_id,))
+        row = c.fetchone()
+        result = row["balance"] if row else 0
+        token_cache.set(cache_key, result)
+        return result
+    finally:
+        release_conn(conn)
+
+
+def add_tokens(owner_id: int, amount: int):
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor()
+        c.execute("UPDATE tokens SET balance = balance + %s, total_earned = total_earned + %s WHERE owner_id = %s",
+                  (amount, amount, owner_id))
+        conn.commit()
+        token_cache.invalidate(f"token_balance:{owner_id}")
+    finally:
+        release_conn(conn)
+
+
+def deduct_tokens(owner_id: int, amount: int) -> bool:
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT balance FROM tokens WHERE owner_id = %s", (owner_id,))
+        row = c.fetchone()
+        if not row or row["balance"] < amount:
+            return False
+        c2 = conn.cursor()
+        c2.execute("UPDATE tokens SET balance = balance - %s WHERE owner_id = %s", (amount, owner_id))
+        conn.commit()
+        token_cache.invalidate(f"token_balance:{owner_id}")
+        return True
+    finally:
+        release_conn(conn)
+
+
+def transfer_diamonds(from_owner_id: int, to_owner_id: int, amount: int) -> tuple:
+    if amount <= 0:
+        return False, " مقدار باید بزرگ‌تر از صفر باشد."
+    if from_owner_id == to_owner_id:
+        return False, "❌ نمی‌توانید به خودتان الماس انتقال دهید."
+    
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, from_owner_id)
+        _ensure_tokens_row(conn, to_owner_id)
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
-        participants = db.get_lottery_participants(lottery_id)
-        if not participants:
-            if _bot:
-                _bot.send_message(group_chat, f"🎲 قرعه‌کشی #{lottery_id} بدون شرکت‌کننده به پایان رسید.")
-            return
+        c.execute("SELECT balance FROM tokens WHERE owner_id = %s", (from_owner_id,))
+        row = c.fetchone()
+        if not row or row["balance"] < amount:
+            return False, f"❌ موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
         
-        winner = random.choice(participants)
-        success, total_prize = db.finish_lottery(lottery_id, winner["user_tg_id"], winner["owner_id"])
+        c_upd = conn.cursor()
+        c_upd.execute("UPDATE tokens SET balance = balance - %s WHERE owner_id = %s", (amount, from_owner_id))
+        c_upd.execute("UPDATE tokens SET balance = balance + %s WHERE owner_id = %s", (amount, to_owner_id))
+        c_upd.execute("""INSERT INTO diamond_transactions (from_owner_id, to_owner_id, amount, type, description)
+                         VALUES (%s, %s, %s, 'transfer', 'انتقال الماس')""",
+                      (from_owner_id, to_owner_id, amount))
         
-        if success and _bot:
-            winner_account = db.get_account(winner["owner_id"])
-            winner_name = winner_account["username"] if winner_account else str(winner["user_tg_id"])
-            _bot.send_message(group_chat, 
-                f"🎉 <b>برنده قرعه‌کشی مشخص شد!</b>\n\n"
-                f"🏆 برنده: <b>{winner_name}</b>\n"
-                f"💎 جایزه: <b>{total_prize} الماس</b>\n"
-                f"👥 شرکت‌کنندگان: {len(participants)} نفر")
-            
-            try:
-                _bot.send_message(winner["user_tg_id"], 
-                    f"🎉 تبریک! شما برنده قرعه‌کشی شدید!\n💎 <b>{total_prize} الماس</b> به حساب شما واریز شد.")
-            except: 
-                pass
+        conn.commit()
+        token_cache.invalidate(f"token_balance:{from_owner_id}")
+        token_cache.invalidate(f"token_balance:{to_owner_id}")
+        return True, f"✅ {amount} الماس با موفقیت انتقال یافت."
     except Exception as e:
-        print(f"❌ خطا در پایان قرعه‌کشی: {e}")
+        return False, f"❌ خطا در انتقال: {str(e)}"
+    finally:
+        release_conn(conn)
+
+
+def claim_daily_token(owner_id: int):
+    from config import DAILY_TOKEN_GIFT
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT last_daily FROM tokens WHERE owner_id = %s", (owner_id,))
+        row = c.fetchone()
+        today = datetime.date.today().isoformat()
+        if row and row["last_daily"] == today:
+            return False, "⏰ امروز قبلاً هدیه روزانه دریافت کردید."
+        
+        c_upd = conn.cursor()
+        c_upd.execute("""UPDATE tokens SET balance = balance + %s, total_earned = total_earned + %s, 
+                         last_daily = %s WHERE owner_id = %s""",
+                      (DAILY_TOKEN_GIFT, DAILY_TOKEN_GIFT, today, owner_id))
+        conn.commit()
+        token_cache.invalidate(f"token_balance:{owner_id}")
+        return True, f" {DAILY_TOKEN_GIFT} الماس روزانه دریافت کردید!"
+    finally:
+        release_conn(conn)
+
+
+def process_referral(referrer_owner_id: int, referred_tg_id: int) -> bool:
+    from config import REFERRAL_TOKENS
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT 1 FROM referrals WHERE referred_tg_id = %s", (referred_tg_id,))
+        if c.fetchone():
+            return False
+        c.execute("SELECT 1 FROM accounts WHERE id = %s", (referrer_owner_id,))
+        if not c.fetchone():
+            return False
+        
+        c_ins = conn.cursor()
+        c_ins.execute("INSERT INTO referrals (referrer_owner_id, referred_tg_id) VALUES (%s, %s)",
+                      (referrer_owner_id, referred_tg_id))
+        _ensure_tokens_row(conn, referrer_owner_id)
+        c_ins.execute("UPDATE tokens SET balance = balance + %s, total_earned = total_earned + %s WHERE owner_id = %s",
+                      (REFERRAL_TOKENS, REFERRAL_TOKENS, referrer_owner_id))
+        conn.commit()
+        token_cache.invalidate(f"token_balance:{referrer_owner_id}")
+        return True
+    except Exception:
+        return False
+    finally:
+        release_conn(conn)
+
+
+def get_referral_count(owner_id: int) -> int:
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT COUNT(*) as cnt FROM referrals WHERE referrer_owner_id = %s", (owner_id,))
+        row = c.fetchone()
+        return row["cnt"] if row else 0
+    finally:
+        release_conn(conn)
+
+
+def get_token_stats(owner_id: int) -> dict:
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT balance, last_daily, total_earned FROM tokens WHERE owner_id = %s", (owner_id,))
+        row = c.fetchone()
+        if not row:
+            return {"balance": 0, "last_daily": None, "total_earned": 0}
+        today = datetime.date.today().isoformat()
+        can_claim = row["last_daily"] != today
+        return {
+            "balance": row["balance"],
+            "last_daily": row["last_daily"],
+            "total_earned": row["total_earned"],
+            "can_claim_daily": can_claim,
+        }
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# دشمن و دوست
+# ══════════════════════════════════════════════════════════════════════════════
+def add_enemy(owner_id: int, user_id: int, username=None, name=None):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO enemies (owner_id, user_id, username, name) VALUES (%s, %s, %s, %s)
+                     ON CONFLICT (owner_id, user_id) DO UPDATE SET username=EXCLUDED.username, name=EXCLUDED.name""",
+                  (owner_id, user_id, username, name))
+        conn.commit()
+        list_cache.invalidate(f"enemies:{owner_id}")
+        return True
+    except Exception:
+        return False
+    finally:
+        release_conn(conn)
+
+
+def remove_enemy(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM enemies WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
+        affected = c.rowcount
+        conn.commit()
+        if affected > 0:
+            list_cache.invalidate(f"enemies:{owner_id}")
+        return affected > 0
+    finally:
+        release_conn(conn)
+
+
+def get_enemies(owner_id: int):
+    cache_key = f"enemies:{owner_id}"
+    cached = list_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM enemies WHERE owner_id = %s ORDER BY added_at DESC", (owner_id,))
+        rows = [dict(r) for r in c.fetchall()]
+        list_cache.set(cache_key, rows)
+        return rows
+    finally:
+        release_conn(conn)
+
+
+def is_enemy(owner_id: int, user_id: int):
+    enemies = get_enemies(owner_id)
+    return any(e["user_id"] == user_id for e in enemies)
+
+
+def clear_enemies(owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM enemies WHERE owner_id = %s", (owner_id,))
+        conn.commit()
+        list_cache.invalidate(f"enemies:{owner_id}")
+    finally:
+        release_conn(conn)
+
+
+def add_friend(owner_id: int, user_id: int, username=None, name=None):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO friends (owner_id, user_id, username, name) VALUES (%s, %s, %s, %s)
+                     ON CONFLICT (owner_id, user_id) DO UPDATE SET username=EXCLUDED.username, name=EXCLUDED.name""",
+                  (owner_id, user_id, username, name))
+        conn.commit()
+        list_cache.invalidate(f"friends:{owner_id}")
+        return True
+    except Exception:
+        return False
+    finally:
+        release_conn(conn)
+
+
+def remove_friend(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM friends WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
+        affected = c.rowcount
+        conn.commit()
+        if affected > 0:
+            list_cache.invalidate(f"friends:{owner_id}")
+        return affected > 0
+    finally:
+        release_conn(conn)
+
+
+def get_friends(owner_id: int):
+    cache_key = f"friends:{owner_id}"
+    cached = list_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM friends WHERE owner_id = %s ORDER BY added_at DESC", (owner_id,))
+        rows = [dict(r) for r in c.fetchall()]
+        list_cache.set(cache_key, rows)
+        return rows
+    finally:
+        release_conn(conn)
+
+
+def is_friend(owner_id: int, user_id: int):
+    friends = get_friends(owner_id)
+    return any(f["user_id"] == user_id for f in friends)
+
+
+def clear_friends(owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM friends WHERE owner_id = %s", (owner_id,))
+        conn.commit()
+        list_cache.invalidate(f"friends:{owner_id}")
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# سایلنت
+# ══════════════════════════════════════════════════════════════════════════════
+def add_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("INSERT INTO silent_chats (owner_id, chat_id) VALUES (%s, %s) ON CONFLICT (owner_id, chat_id) DO NOTHING",
+                  (owner_id, chat_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def remove_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM silent_chats WHERE owner_id = %s AND chat_id = %s", (owner_id, chat_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def is_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT 1 FROM silent_chats WHERE owner_id = %s AND chat_id = %s", (owner_id, chat_id))
+        return c.fetchone() is not None
+    finally:
+        release_conn(conn)
+
+
+def add_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("INSERT INTO silent_users (owner_id, user_id) VALUES (%s, %s) ON CONFLICT (owner_id, user_id) DO NOTHING",
+                  (owner_id, user_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def remove_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM silent_users WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def is_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT 1 FROM silent_users WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
+        return c.fetchone() is not None
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# پیام‌ها
+# ══════════════════════════════════════════════════════════════════════════════
+def save_message_slot(owner_id: int, slot: int, content, media_path=None):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO saved_messages (owner_id, slot, content, media_path) VALUES (%s, %s, %s, %s)
+                     ON CONFLICT (owner_id, slot) DO UPDATE SET content=EXCLUDED.content, media_path=EXCLUDED.media_path""",
+                  (owner_id, slot, content, media_path))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def get_message_slot(owner_id: int, slot: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM saved_messages WHERE owner_id = %s AND slot = %s", (owner_id, slot))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        release_conn(conn)
+
+
+def log_deleted_message(owner_id: int, chat_id, sender_id, sender_name, message, media_type=None):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO deleted_messages (owner_id, chat_id, sender_id, sender_name, message, media_type)
+                     VALUES (%s, %s, %s, %s, %s, %s)""",
+                  (owner_id, chat_id, sender_id, sender_name, message, media_type))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def get_deleted_messages(owner_id: int, limit=50):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM deleted_messages WHERE owner_id = %s ORDER BY deleted_at DESC LIMIT %s",
+                  (owner_id, limit))
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def add_scheduled_message(owner_id: int, chat_id, message, send_at):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("""INSERT INTO scheduled_messages (owner_id, chat_id, message, send_at)
+                     VALUES (%s, %s, %s, %s) RETURNING id""",
+                  (owner_id, chat_id, message, send_at))
+        last_id = c.fetchone()["id"]
+        conn.commit()
+        return last_id
+    finally:
+        release_conn(conn)
+
+
+def get_pending_scheduled(owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("""SELECT * FROM scheduled_messages 
+                     WHERE owner_id = %s AND sent = 0 AND send_at <= CURRENT_TIMESTAMP 
+                     ORDER BY send_at""", (owner_id,))
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def mark_scheduled_sent(msg_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE scheduled_messages SET sent = 1 WHERE id = %s", (msg_id,))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# چنل‌های اجباری
+# ══════════════════════════════════════════════════════════════════════════════
+def get_forced_channels():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT username FROM forced_channels ORDER BY added_at DESC")
+        return [r["username"] for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def add_forced_channel(username: str) -> bool:
+    if not username.startswith("@"):
+        username = "@" + username
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("INSERT INTO forced_channels (username) VALUES (%s)", (username,))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        release_conn(conn)
+
+
+def remove_forced_channel(username: str) -> bool:
+    if not username.startswith("@"):
+        username = "@" + username
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM forced_channels WHERE username = %s", (username,))
+        affected = c.rowcount
+        conn.commit()
+        return affected > 0
+    finally:
+        release_conn(conn)
+
+
+def check_user_membership(bot, user_id: int) -> tuple:
+    channels = get_forced_channels()
+    if not channels:
+        return True, []
+    missing = []
+    for ch in channels:
+        try:
+            member = bot.get_chat_member(ch, user_id)
+            if member.status not in ['member', 'administrator', 'creator']:
+                missing.append(ch)
+        except Exception:
+            missing.append(ch)
+    return len(missing) == 0, missing
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# جام جهانی
+# ══════════════════════════════════════════════════════════════════════════════
+def create_world_cup_challenge(team1: str, team2: str, match_time: str, bet_amount: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("""INSERT INTO world_cup_challenges (team1, team2, match_time, bet_amount, status)
+                     VALUES (%s, %s, %s, %s, 'active') RETURNING id""",
+                  (team1, team2, match_time, bet_amount))
+        challenge_id = c.fetchone()["id"]
+        conn.commit()
+        return challenge_id
+    finally:
+        release_conn(conn)
+
+
+def update_challenge_message(challenge_id: int, message_id: int, chat_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE world_cup_challenges SET message_id = %s, chat_id = %s WHERE id = %s",
+                  (message_id, chat_id, challenge_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def get_active_challenges():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM world_cup_challenges WHERE status = 'active' ORDER BY created_at DESC")
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def get_challenge(challenge_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM world_cup_challenges WHERE id = %s", (challenge_id,))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        release_conn(conn)
+
+
+def place_bet(challenge_id: int, user_tg_id: int, owner_id: int, team_choice: str, bet_amount: int) -> tuple:
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        c.execute("SELECT balance FROM tokens WHERE owner_id = %s", (owner_id,))
+        row = c.fetchone()
+        if not row or row["balance"] < bet_amount:
+            return False, f"❌ موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس"
+        
+        c.execute("SELECT 1 FROM world_cup_bets WHERE challenge_id = %s AND user_tg_id = %s",
+                  (challenge_id, user_tg_id))
+        if c.fetchone():
+            return False, "❌ شما قبلاً در این چالش شرکت کرده‌اید."
+        
+        c_upd = conn.cursor()
+        c_upd.execute("UPDATE tokens SET balance = balance - %s WHERE owner_id = %s", (bet_amount, owner_id))
+        c_upd.execute("""INSERT INTO world_cup_bets (challenge_id, user_tg_id, owner_id, team_choice, bet_amount)
+                         VALUES (%s, %s, %s, %s, %s)""",
+                      (challenge_id, user_tg_id, owner_id, team_choice, bet_amount))
+        
+        conn.commit()
+        token_cache.invalidate(f"token_balance:{owner_id}")
+        return True, f"✅ شرط {bet_amount} الماس روی {team_choice} ثبت شد."
+    except Exception as e:
+        return False, f"❌ خطا: {str(e)}"
+    finally:
+        release_conn(conn)
+
+
+def get_challenge_bets(challenge_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM world_cup_bets WHERE challenge_id = %s", (challenge_id,))
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def set_challenge_winner(challenge_id: int, winner_team: str):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE world_cup_challenges SET winner_team = %s, status = 'finished' WHERE id = %s",
+                  (winner_team, challenge_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def settle_challenge_bets(challenge_id: int):
+    challenge = get_challenge(challenge_id)
+    if not challenge or not challenge["winner_team"]:
+        return False, "❌ چالش یافت نشد یا برنده مشخص نشده."
+    
+    bets = get_challenge_bets(challenge_id)
+    results = []
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        for bet in bets:
+            if bet["team_choice"] == challenge["winner_team"]:
+                winnings = bet["bet_amount"] * 2
+                c.execute("UPDATE tokens SET balance = balance + %s WHERE owner_id = %s",
+                          (winnings, bet["owner_id"]))
+                c.execute("UPDATE world_cup_bets SET result = 'won' WHERE id = %s", (bet["id"],))
+                results.append({"user_tg_id": bet["user_tg_id"], "owner_id": bet["owner_id"],
+                                "result": "won", "amount": winnings})
+            else:
+                c.execute("UPDATE world_cup_bets SET result = 'lost' WHERE id = %s", (bet["id"],))
+                results.append({"user_tg_id": bet["user_tg_id"], "owner_id": bet["owner_id"],
+                                "result": "lost", "amount": bet["bet_amount"]})
+        
+        conn.commit()
+        for r in results:
+            token_cache.invalidate(f"token_balance:{r['owner_id']}")
+        return True, results
+    except Exception as e:
+        return False, str(e)
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# قرعه‌کشی - با entry_fee
+# ══════════════════════════════════════════════════════════════════════════════
+def create_lottery(chat_id: int, creator_tg_id: int, prize_amount: int, duration_minutes: int, entry_fee: int = 1):
+    """ایجاد قرعه‌کشی با entry_fee قابل تنظیم"""
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        end_time = datetime.datetime.now() + datetime.timedelta(minutes=duration_minutes)
+        c.execute("""INSERT INTO lotteries (chat_id, creator_tg_id, prize_amount, entry_fee, end_time, status)
+                     VALUES (%s, %s, %s, %s, %s, 'active') RETURNING id""",
+                  (chat_id, creator_tg_id, prize_amount, entry_fee, end_time.isoformat()))
+        lottery_id = c.fetchone()["id"]
+        conn.commit()
+        return lottery_id
+    finally:
+        release_conn(conn)
+
+
+def update_lottery_message(lottery_id: int, message_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE lotteries SET message_id = %s WHERE id = %s", (message_id, lottery_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def get_active_lotteries():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM lotteries WHERE status = 'active' ORDER BY created_at DESC")
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def get_lottery(lottery_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM lotteries WHERE id = %s", (lottery_id,))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        release_conn(conn)
+
+
+def join_lottery(lottery_id: int, user_tg_id: int, owner_id: int) -> tuple:
+    """شرکت در قرعه‌کشی - entry_fee از جدول خوانده می‌شود"""
+    conn = get_conn()
+    try:
+        _ensure_tokens_row(conn, owner_id)
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # خواندن entry_fee از جدول
+        c.execute("SELECT entry_fee FROM lotteries WHERE id = %s AND status = 'active'", (lottery_id,))
+        lottery_row = c.fetchone()
+        if not lottery_row:
+            return False, "❌ قرعه‌کشی فعال نیست یا یافت نشد."
+        
+        entry_fee = lottery_row["entry_fee"]
+        
+        # بررسی موجودی
+        c.execute("SELECT balance FROM tokens WHERE owner_id = %s", (owner_id,))
+        row = c.fetchone()
+        if not row or row["balance"] < entry_fee:
+            return False, f"❌ موجودی کافی ندارید. موجودی: {row['balance'] if row else 0} الماس | هزینه: {entry_fee} الماس"
+        
+        # بررسی شرکت قبلی
+        c.execute("SELECT 1 FROM lottery_participants WHERE lottery_id = %s AND user_tg_id = %s",
+                  (lottery_id, user_tg_id))
+        if c.fetchone():
+            return False, "❌ شما قبلاً در این قرعه‌کشی شرکت کرده‌اید."
+        
+        # کسر الماس و ثبت شرکت
+        c_upd = conn.cursor()
+        c_upd.execute("UPDATE tokens SET balance = balance - %s WHERE owner_id = %s", (entry_fee, owner_id))
+        c_upd.execute("""INSERT INTO lottery_participants (lottery_id, user_tg_id, owner_id, bet_amount)
+                         VALUES (%s, %s, %s, %s)""",
+                      (lottery_id, user_tg_id, owner_id, entry_fee))
+        
+        conn.commit()
+        token_cache.invalidate(f"token_balance:{owner_id}")
+        return True, f"✅ با {entry_fee} الماس در قرعه‌کشی شرکت کردید."
+    except Exception as e:
+        return False, f"❌ خطا: {str(e)}"
+    finally:
+        release_conn(conn)
+
+
+def get_lottery_participants(lottery_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM lottery_participants WHERE lottery_id = %s", (lottery_id,))
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def finish_lottery(lottery_id: int, winner_tg_id: int, winner_owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM lottery_participants WHERE lottery_id = %s", (lottery_id,))
+        participants = c.fetchall()
+        
+        total_prize = sum(p["bet_amount"] for p in participants)
+        
+        c_upd = conn.cursor()
+        c_upd.execute("UPDATE tokens SET balance = balance + %s WHERE owner_id = %s",
+                      (total_prize, winner_owner_id))
+        c_upd.execute("UPDATE lotteries SET winner_tg_id = %s, status = 'finished' WHERE id = %s",
+                      (winner_tg_id, lottery_id))
+        
+        conn.commit()
+        token_cache.invalidate(f"token_balance:{winner_owner_id}")
+        return True, total_prize
+    except Exception as e:
+        return False, str(e)
+    finally:
+        release_conn(conn)
+
+
+def get_expired_lotteries():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM lotteries WHERE status = 'active' AND end_time <= CURRENT_TIMESTAMP")
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def update_lottery_entry_fee(lottery_id: int, new_fee: int) -> bool:
+    """به‌روزرسانی هزینه ثبت‌نام قرعه‌کشی"""
+    if new_fee < 0:
+        return False
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE lotteries SET entry_fee = %s WHERE id = %s AND status = 'active'", 
+                  (new_fee, lottery_id))
+        affected = c.rowcount
+        conn.commit()
+        return affected > 0
+    finally:
+        release_conn(conn)
