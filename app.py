@@ -1,6 +1,7 @@
 import asyncio
 import os
 import threading
+import time as _time
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from telethon import TelegramClient
@@ -14,23 +15,29 @@ from telethon.errors import (
 import database as db
 import config
 
-app = Flask(__name__)
+# ✅ تعیین مسیر صحیح templates
+template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+app = Flask(__name__, template_folder=template_dir)
 app.secret_key = config.SECRET_KEY
 
-# ─── پایگاه داده را فقط یک بار بساز ────────────────────────────────────────────
+# ─── پایگاه داده ────────────────────────────────────────────────────────────
 db.init_db()
 
+# ─── Error Handlers ─────────────────────────────────────────────────────────
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"ok": False, "error": "صفحه یافت نشد"}), 404
 
 @app.errorhandler(500)
 def server_error(e):
-    return jsonify({"ok": False, "error": f"خطای داخلی سرور: {str(e)}"}), 500
-
+    return jsonify({"ok": False, "error": f"خطای سرور: {str(e)}"}), 500
 
 @app.errorhandler(Exception)
 def unhandled_exception(e):
+    print(f"❌ خطای غیرمنتظره: {e}")
     return jsonify({"ok": False, "error": f"خطای غیرمنتظره: {str(e)}"}), 500
 
-# ─── event loop جداگانه برای Telethon ────────────────────────────────────────
+# ─── event loop برای Telethon ───────────────────────────────────────────────
 _loop = None
 _login_clients = {}
 _phone_hashes = {}
@@ -50,7 +57,7 @@ def run_async(coro):
     return asyncio.run_coroutine_threadsafe(coro, get_loop()).result(timeout=60)
 
 
-# ─── احراز هویت پنل ───────────────────────────────────────────────────────────
+# ─── احراز هویت ────────────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -66,7 +73,7 @@ def owner_id() -> int:
     return int(session["owner_id"])
 
 
-# ─── keep-alive ───────────────────────────────────────────────────────────────
+# ─── keep-alive ─────────────────────────────────────────────────────────────
 @app.route("/ping")
 def ping():
     return "pong", 200
@@ -77,7 +84,7 @@ def health():
     return jsonify({"status": "ok", "bot": config.BOT_NAME}), 200
 
 
-# ─── صفحه اصلی پنل ───────────────────────────────────────────────────────────
+# ─── صفحه اصلی ──────────────────────────────────────────────────────────────
 @app.route("/")
 @login_required
 def index():
@@ -88,7 +95,6 @@ def index():
         session.pop("owner_id", None)
         return redirect(url_for("login"))
     
-    # بررسی وضعیت سشن
     has_session = db.is_session_active(oid)
     balance = db.get_balance(oid)
     
@@ -102,7 +108,7 @@ def index():
     )
 
 
-# ─── ورود به پنل ─────────────────────────────────────────────────────────────
+# ─── ورود ───────────────────────────────────────────────────────────────────
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if session.get("owner_id"):
@@ -176,18 +182,17 @@ def register():
     return render_template("register.html")
 
 
-# ─── خروج ────────────────────────────────────────────────────────────────────
+# ─── خروج ───────────────────────────────────────────────────────────────────
 @app.route("/logout")
 def logout():
     oid = session.get("owner_id")
     if oid:
-        # حذف سشن تلگرام
         db.delete_session(oid)
     session.pop("owner_id", None)
     return redirect(url_for("login"))
 
 
-# ─── لاگین تلگرام ────────────────────────────────────────────────────────────
+# ─── لاگین تلگرام ───────────────────────────────────────────────────────────
 @app.route("/tg-login")
 @login_required
 def tg_login_page():
@@ -220,7 +225,6 @@ def send_code():
         partial_sess = cl.session.save()
         await cl.disconnect()
         
-        # ذخیره موقت در حافظه
         _phone_hashes[oid] = result.phone_code_hash
         _phone_numbers[oid] = phone
         _login_clients[oid] = partial_sess
@@ -260,12 +264,10 @@ def verify_code():
         sess = cl.session.save()
         await cl.disconnect()
         
-        # پاک کردن داده‌های موقت
         _login_clients.pop(oid, None)
         _phone_hashes.pop(oid, None)
         _phone_numbers.pop(oid, None)
         
-        # ✅ ذخیره سشن در جدول sessions (Supabase)
         db.save_session(oid, sess, phone)
         db.save_telegram_user_id(oid, me.id)
         
@@ -310,7 +312,6 @@ def verify_2fa():
         _phone_hashes.pop(oid, None)
         _phone_numbers.pop(oid, None)
         
-        # ✅ ذخیره سشن در جدول sessions
         db.save_session(oid, sess, phone)
         db.save_telegram_user_id(oid, me.id)
         
@@ -328,26 +329,22 @@ def verify_2fa():
 def tg_logout():
     oid = owner_id()
     
-    # توقف سلف‌بات
     try:
         from bot import bot_manager
         bot_manager.stop(oid)
     except:
         pass
     
-    # حذف سشن از Supabase
     db.delete_session(oid)
-    
     return jsonify({"ok": True})
 
 
-# ─── روشن / خاموش کردن سلف ───────────────────────────────────────────────────
+# ─── روشن / خاموش کردن سلف ─────────────────────────────────────────────────
 @app.route("/api/start", methods=["POST"])
 @login_required
 def start_bot_api():
     oid = owner_id()
     
-    # بررسی وجود سشن
     session_data = db.get_session(oid)
     if not session_data:
         return jsonify({
@@ -355,8 +352,11 @@ def start_bot_api():
             "error": "ابتدا باید وارد حساب تلگرام شوید"
         }), 400
     
-    from bot import bot_manager
-    ok = bot_manager.start(oid, get_loop(), check_tokens=True)
+    try:
+        from bot import bot_manager
+        ok = bot_manager.start(oid, get_loop(), check_tokens=True)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"خطا در استارت سلف: {e}"}), 500
     
     if ok:
         db.set_setting(oid, "self_active", "1")
@@ -366,14 +366,16 @@ def start_bot_api():
         if is_owner:
             msg = "✅ سلف روشن شد — دسترسی رایگان مالک ♾️"
         else:
-            msg = f"✅ سلف روشن شد — {config.SELF_PRICE} الماس کسر شد — 2 ساعت فعال است"
+            price = getattr(config, 'SELF_PRICE', 2)
+            msg = f"✅ سلف روشن شد — {price} الماس کسر شد — 2 ساعت فعال است"
         
         return jsonify({"ok": True, "message": msg})
     else:
         balance = db.get_balance(oid)
+        price = getattr(config, 'SELF_PRICE', 2)
         return jsonify({
             "ok": False,
-            "error": f"الماس کافی ندارید! موجودی: {balance} — برای روشن کردن {config.SELF_PRICE} الماس لازم است.",
+            "error": f"الماس کافی ندارید! موجودی: {balance} — برای روشن کردن {price} الماس لازم است.",
         })
 
 
@@ -399,8 +401,11 @@ def session_status():
     oid = owner_id()
     is_active = db.is_session_active(oid)
     
-    from bot import bot_manager
-    is_running = bot_manager.is_running(oid)
+    try:
+        from bot import bot_manager
+        is_running = bot_manager.is_running(oid)
+    except:
+        is_running = False
     
     return jsonify({
         "active": is_active,
@@ -438,7 +443,7 @@ def api_balance():
     })
 
 
-# ── API تنظیمات ─────────────────────────────────────────────────────────────
+# ─── API تنظیمات ────────────────────────────────────────────────────────────
 @app.route("/api/settings", methods=["GET"])
 @login_required
 def get_settings():
@@ -448,6 +453,7 @@ def get_settings():
         "anti_link", "auto_seen", "auto_reaction",
         "private_lock", "save_media", "clock_name",
         "clock_bio", "font", "secretary_msg", "reaction_emoji",
+        "enemy_reply", "friend_reply",
     ]
     return jsonify({k: db.get_setting(oid, k) for k in keys})
 
@@ -462,6 +468,7 @@ def update_settings():
         "secretary", "anti_delete", "anti_link",
         "auto_seen", "auto_reaction", "private_lock",
         "save_media", "clock_name", "clock_bio",
+        "enemy_reply", "friend_reply",
     ]
     for k in allowed:
         if k in data:
@@ -476,6 +483,7 @@ def toggle(key):
         "self_active", "secretary", "anti_delete",
         "anti_link", "auto_seen", "auto_reaction",
         "private_lock", "save_media", "clock_name", "clock_bio",
+        "enemy_reply", "friend_reply",
     ]
     if key not in allowed:
         return jsonify({"ok": False, "error": "کلید مجاز نیست"}), 400
@@ -510,10 +518,6 @@ def api_transfer():
         return jsonify({"ok": False, "error": "نمی‌توانید به خودتان الماس انتقال دهید"}), 400
     
     success, msg = db.transfer_balance(oid, to_account["id"], amount)
-    
-    if success:
-        db.log_transaction(oid, to_account["id"], amount, "transfer")
-    
     return jsonify({"ok": success, "message": msg})
 
 
@@ -524,15 +528,16 @@ def claim_daily():
     oid = owner_id()
     
     last = db.get_setting(oid, "last_daily", "0")
-    now = int(__import__('time').time())
+    now = int(_time.time())
+    
+    daily_gift = getattr(config, 'DAILY_GIFT', 1)
     
     if now - int(last) > 86400:
-        db.add_balance(oid, config.DAILY_GIFT)
+        db.add_balance(oid, daily_gift)
         db.set_setting(oid, "last_daily", str(now))
-        db.log_transaction(0, oid, config.DAILY_GIFT, "daily_gift")
         return jsonify({
             "ok": True, 
-            "message": f" {config.DAILY_GIFT} الماس دریافت کردید!",
+            "message": f"🎁 {daily_gift} الماس دریافت کردید!",
             "balance": db.get_balance(oid)
         })
     else:
@@ -582,7 +587,7 @@ def admin_users():
     })
 
 
-# ── API دادن الماس (مالک) ─────────────────────────────────────────────────
+# ─── API دادن الماس (مالک) ─────────────────────────────────────────────────
 @app.route("/api/admin/give", methods=["POST"])
 @login_required
 def admin_give():
@@ -608,7 +613,6 @@ def admin_give():
         return jsonify({"ok": False, "error": f"کاربر '{username}' یافت نشد"}), 404
     
     db.add_balance(to_account["id"], amount)
-    db.log_transaction(oid, to_account["id"], amount, "admin_gift")
     
     return jsonify({
         "ok": True, 
@@ -617,15 +621,13 @@ def admin_give():
     })
 
 
-# ─── اجرا ────────────────────────────────────────────────────────────────────
+# ─── اجرا ───────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # استارت ربات تلگرام مدیریت
+    # استارت ربات تلگرام
     from telegram_bot import start_token_bot
     start_token_bot()
     
-    # ══════════════════════════════════════════════════════════════════════════
-    # 🚀 استارت خودکار سشن‌های فعال از Supabase
-    # ══════════════════════════════════════════════════════════════════════════
+    # استارت خودکار سلف‌بات‌های فعال
     loop = get_loop()
     active_sessions = db.get_all_active_sessions()
     
@@ -633,7 +635,6 @@ if __name__ == "__main__":
     for sess in active_sessions:
         owner_id_val = sess["owner_id"]
         try:
-            # بررسی تنظیمات
             self_active = db.get_setting(owner_id_val, "self_active", "0")
             if self_active == "1":
                 from bot import bot_manager
