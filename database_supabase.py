@@ -8,7 +8,7 @@ from config import DATABASE_URL
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Connection Pooling
+# 🚀 Connection Pooling
 # ══════════════════════════════════════════════════════════════════════════════
 _connection_pool = None
 _pool_lock = threading.Lock()
@@ -88,17 +88,18 @@ class FastCache:
 account_cache = FastCache(ttl=600)
 balance_cache = FastCache(ttl=60)
 session_cache = FastCache(ttl=3600)
+list_cache = FastCache(ttl=180)  # برای دشمن و دوست
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Init DB - فقط 3 جدول اصلی
+# Init DB
 # ══════════════════════════════════════════════════════════════════════════════
 def init_db():
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Accounts - با balance مستقیم
+        # Accounts
         c.execute("""CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
@@ -116,7 +117,7 @@ def init_db():
             PRIMARY KEY (owner_id, key)
         )""")
 
-        # Sessions - برای ذخیره سشن‌های تلگرام
+        # Sessions
         c.execute("""CREATE TABLE IF NOT EXISTS sessions (
             owner_id BIGINT PRIMARY KEY,
             session_data TEXT NOT NULL,
@@ -126,11 +127,79 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
 
+        # ═══════════════════════════════════════════════════════════════════
+        # 🆕 جداول جدید: دشمن، دوست، سایلنت، پیام ذخیره، زمان‌بندی
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # Enemies
+        c.execute("""CREATE TABLE IF NOT EXISTS enemies (
+            id SERIAL PRIMARY KEY,
+            owner_id BIGINT NOT NULL,
+            user_id BIGINT NOT NULL,
+            username TEXT,
+            name TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, user_id)
+        )""")
+
+        # Friends
+        c.execute("""CREATE TABLE IF NOT EXISTS friends (
+            id SERIAL PRIMARY KEY,
+            owner_id BIGINT NOT NULL,
+            user_id BIGINT NOT NULL,
+            username TEXT,
+            name TEXT,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, user_id)
+        )""")
+
+        # Silent Chats
+        c.execute("""CREATE TABLE IF NOT EXISTS silent_chats (
+            id SERIAL PRIMARY KEY,
+            owner_id BIGINT NOT NULL,
+            chat_id BIGINT NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, chat_id)
+        )""")
+
+        # Silent Users
+        c.execute("""CREATE TABLE IF NOT EXISTS silent_users (
+            id SERIAL PRIMARY KEY,
+            owner_id BIGINT NOT NULL,
+            user_id BIGINT NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (owner_id, user_id)
+        )""")
+
+        # Saved Messages
+        c.execute("""CREATE TABLE IF NOT EXISTS saved_messages (
+            owner_id BIGINT NOT NULL,
+            slot INTEGER NOT NULL,
+            content TEXT,
+            saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (owner_id, slot)
+        )""")
+
+        # Scheduled Messages
+        c.execute("""CREATE TABLE IF NOT EXISTS scheduled_messages (
+            id SERIAL PRIMARY KEY,
+            owner_id BIGINT NOT NULL,
+            chat_id BIGINT NOT NULL,
+            message TEXT NOT NULL,
+            send_at TIMESTAMP NOT NULL,
+            sent INTEGER DEFAULT 0
+        )""")
+
         # Indexes
         c.execute("CREATE INDEX IF NOT EXISTS idx_acc_tg ON accounts(telegram_user_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_acc_user ON accounts(username)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_set_owner ON settings(owner_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_sess_active ON sessions(is_active)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_enemies_owner ON enemies(owner_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_friends_owner ON friends(owner_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_silent_chats ON silent_chats(owner_id, chat_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_silent_users ON silent_users(owner_id, user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_scheduled_pending ON scheduled_messages(owner_id, sent, send_at)")
 
         conn.commit()
         print("✅ Supabase آماده شد")
@@ -318,7 +387,7 @@ def transfer_balance(from_id: int, to_id: int, amount: int) -> tuple:
         balance_cache.invalidate(f"balance:{to_id}")
         return True, f"✅ {amount} الماس انتقال یافت"
     except Exception as e:
-        return False, f" خطا: {e}"
+        return False, f"❌ خطا: {e}"
     finally:
         release_conn(conn)
 
@@ -332,6 +401,7 @@ SETTING_DEFAULTS = {
     "private_lock": "0", "save_media": "0", "clock_name": "0",
     "clock_bio": "0", "font": "0", "secretary_msg": "در دسترس نیستم",
     "reaction_emoji": "❤️", "last_daily": "0",
+    "enemy_reply": "0", "friend_reply": "0",
 }
 
 
@@ -372,9 +442,9 @@ def set_setting(owner_id: int, key: str, value):
         release_conn(conn)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  Sessions - ذخیره در Supabase
-# ═════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# Sessions
+# ══════════════════════════════════════════════════════════════════════════════
 def save_session(owner_id: int, session_data: str, phone: str = None):
     cache_key = f"session:{owner_id}"
     
@@ -393,7 +463,7 @@ def save_session(owner_id: int, session_data: str, phone: str = None):
         session_cache.set(cache_key, session_data)
         return True
     except Exception as e:
-        print(f" خطا در ذخیره سشن: {e}")
+        print(f"❌ خطا در ذخیره سشن: {e}")
         return False
     finally:
         release_conn(conn)
@@ -432,7 +502,7 @@ def delete_session(owner_id: int):
         session_cache.invalidate(cache_key)
         return True
     except Exception as e:
-        print(f" خطا در حذف سشن: {e}")
+        print(f"❌ خطا در حذف سشن: {e}")
         return False
     finally:
         release_conn(conn)
@@ -464,5 +534,270 @@ def is_session_active(owner_id: int) -> bool:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         c.execute("SELECT 1 FROM sessions WHERE owner_id = %s AND is_active = TRUE", (owner_id,))
         return c.fetchone() is not None
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 دشمن
+# ══════════════════════════════════════════════════════════════════════════════
+def add_enemy(owner_id: int, user_id: int, username=None, name=None):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO enemies (owner_id, user_id, username, name) VALUES (%s, %s, %s, %s)
+                     ON CONFLICT (owner_id, user_id) DO UPDATE SET username=EXCLUDED.username, name=EXCLUDED.name""",
+                  (owner_id, user_id, username, name))
+        conn.commit()
+        list_cache.invalidate(f"enemies:{owner_id}")
+        return True
+    except Exception:
+        return False
+    finally:
+        release_conn(conn)
+
+
+def remove_enemy(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM enemies WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
+        affected = c.rowcount
+        conn.commit()
+        if affected > 0:
+            list_cache.invalidate(f"enemies:{owner_id}")
+        return affected > 0
+    finally:
+        release_conn(conn)
+
+
+def get_enemies(owner_id: int):
+    cache_key = f"enemies:{owner_id}"
+    cached = list_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM enemies WHERE owner_id = %s ORDER BY added_at DESC", (owner_id,))
+        rows = [dict(r) for r in c.fetchall()]
+        list_cache.set(cache_key, rows)
+        return rows
+    finally:
+        release_conn(conn)
+
+
+def is_enemy(owner_id: int, user_id: int):
+    enemies = get_enemies(owner_id)
+    return any(e["user_id"] == user_id for e in enemies)
+
+
+def clear_enemies(owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM enemies WHERE owner_id = %s", (owner_id,))
+        conn.commit()
+        list_cache.invalidate(f"enemies:{owner_id}")
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 دوست
+# ══════════════════════════════════════════════════════════════════════════════
+def add_friend(owner_id: int, user_id: int, username=None, name=None):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO friends (owner_id, user_id, username, name) VALUES (%s, %s, %s, %s)
+                     ON CONFLICT (owner_id, user_id) DO UPDATE SET username=EXCLUDED.username, name=EXCLUDED.name""",
+                  (owner_id, user_id, username, name))
+        conn.commit()
+        list_cache.invalidate(f"friends:{owner_id}")
+        return True
+    except Exception:
+        return False
+    finally:
+        release_conn(conn)
+
+
+def remove_friend(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM friends WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
+        affected = c.rowcount
+        conn.commit()
+        if affected > 0:
+            list_cache.invalidate(f"friends:{owner_id}")
+        return affected > 0
+    finally:
+        release_conn(conn)
+
+
+def get_friends(owner_id: int):
+    cache_key = f"friends:{owner_id}"
+    cached = list_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM friends WHERE owner_id = %s ORDER BY added_at DESC", (owner_id,))
+        rows = [dict(r) for r in c.fetchall()]
+        list_cache.set(cache_key, rows)
+        return rows
+    finally:
+        release_conn(conn)
+
+
+def is_friend(owner_id: int, user_id: int):
+    friends = get_friends(owner_id)
+    return any(f["user_id"] == user_id for f in friends)
+
+
+def clear_friends(owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM friends WHERE owner_id = %s", (owner_id,))
+        conn.commit()
+        list_cache.invalidate(f"friends:{owner_id}")
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 سایلنت
+# ══════════════════════════════════════════════════════════════════════════════
+def add_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("INSERT INTO silent_chats (owner_id, chat_id) VALUES (%s, %s) ON CONFLICT (owner_id, chat_id) DO NOTHING",
+                  (owner_id, chat_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def remove_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM silent_chats WHERE owner_id = %s AND chat_id = %s", (owner_id, chat_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def is_silent_chat(owner_id: int, chat_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT 1 FROM silent_chats WHERE owner_id = %s AND chat_id = %s", (owner_id, chat_id))
+        return c.fetchone() is not None
+    finally:
+        release_conn(conn)
+
+
+def add_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("INSERT INTO silent_users (owner_id, user_id) VALUES (%s, %s) ON CONFLICT (owner_id, user_id) DO NOTHING",
+                  (owner_id, user_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def remove_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM silent_users WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
+        conn.commit()
+    finally:
+        release_conn(conn)
+
+
+def is_silent_user(owner_id: int, user_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT 1 FROM silent_users WHERE owner_id = %s AND user_id = %s", (owner_id, user_id))
+        return c.fetchone() is not None
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 پیام‌های ذخیره‌شده
+# ══════════════════════════════════════════════════════════════════════════════
+def save_message_slot(owner_id: int, slot: int, content: str):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("""INSERT INTO saved_messages (owner_id, slot, content) VALUES (%s, %s, %s)
+                     ON CONFLICT (owner_id, slot) DO UPDATE SET content=EXCLUDED.content""",
+                  (owner_id, slot, content))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        release_conn(conn)
+
+
+def get_message_slot(owner_id: int, slot: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM saved_messages WHERE owner_id = %s AND slot = %s", (owner_id, slot))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        release_conn(conn)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 پیام‌های زمان‌بندی‌شده
+# ══════════════════════════════════════════════════════════════════════════════
+def add_scheduled_message(owner_id: int, chat_id: int, message: str, send_at: str):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("""INSERT INTO scheduled_messages (owner_id, chat_id, message, send_at)
+                     VALUES (%s, %s, %s, %s) RETURNING id""",
+                  (owner_id, chat_id, message, send_at))
+        last_id = c.fetchone()["id"]
+        conn.commit()
+        return last_id
+    finally:
+        release_conn(conn)
+
+
+def get_pending_scheduled(owner_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("""SELECT * FROM scheduled_messages 
+                     WHERE owner_id = %s AND sent = 0 AND send_at <= CURRENT_TIMESTAMP 
+                     ORDER BY send_at""", (owner_id,))
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
+def mark_scheduled_sent(msg_id: int):
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("UPDATE scheduled_messages SET sent = 1 WHERE id = %s", (msg_id,))
+        conn.commit()
     finally:
         release_conn(conn)
