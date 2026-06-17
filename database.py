@@ -108,52 +108,40 @@ def get_referral_count(owner_id: int) -> int:
 
 # ─── 📋 توابع دشمن (ذخیره در دیتابیس کش) ──────────────────────────────────────
 def add_enemy(owner_id: int, user_id: int, username=None, name=None):
-    """افزودن دشمن - ذخیره در دیتابیس کش"""
     return cache.add_enemy(owner_id, user_id, username, name)
 
 def remove_enemy(owner_id: int, user_id: int) -> bool:
-    """حذف دشمن - از دیتابیس کش"""
     return cache.remove_enemy(owner_id, user_id)
 
 def get_enemies(owner_id: int) -> List[Dict]:
-    """دریافت لیست دشمن‌ها - از دیتابیس کش"""
     return cache.get_enemies(owner_id)
 
 def is_enemy(owner_id: int, user_id: int) -> bool:
-    """بررسی دشمن بودن کاربر - از دیتابیس کش"""
     return cache.is_enemy(owner_id, user_id)
 
 def clear_enemies(owner_id: int):
-    """پاک کردن لیست دشمن - از دیتابیس کش"""
     cache.clear_enemies(owner_id)
 
 def get_enemy_count(owner_id: int) -> int:
-    """تعداد دشمن‌ها - از دیتابیس کش"""
     return cache.get_enemy_count(owner_id)
 
 # ─── 📋 توابع دوست (ذخیره در دیتابیس کش) ──────────────────────────────────────
 def add_friend(owner_id: int, user_id: int, username=None, name=None):
-    """افزودن دوست - ذخیره در دیتابیس کش"""
     return cache.add_friend(owner_id, user_id, username, name)
 
 def remove_friend(owner_id: int, user_id: int) -> bool:
-    """حذف دوست - از دیتابیس کش"""
     return cache.remove_friend(owner_id, user_id)
 
 def get_friends(owner_id: int) -> List[Dict]:
-    """دریافت لیست دوست‌ها - از دیتابیس کش"""
     return cache.get_friends(owner_id)
 
 def is_friend(owner_id: int, user_id: int) -> bool:
-    """بررسی دوست بودن کاربر - از دیتابیس کش"""
     return cache.is_friend(owner_id, user_id)
 
 def clear_friends(owner_id: int):
-    """پاک کردن لیست دوست - از دیتابیس کش"""
     cache.clear_friends(owner_id)
 
 def get_friend_count(owner_id: int) -> int:
-    """تعداد دوست‌ها - از دیتابیس کش"""
     return cache.get_friend_count(owner_id)
 
 # ─── توابع پیام ────────────────────────────────────────────────────────────────
@@ -178,19 +166,7 @@ def log_deleted_message(owner_id: int, chat_id, sender_id, sender_name, message,
 def get_deleted_messages(owner_id: int, limit=50):
     return supa_get_deleted_messages(owner_id, limit)
 
-# ─── توابع دیتابیس کش (سایلنت و چنل‌ها) ──────────────────────────────────────
-def get_forced_channels():
-    return cache.get_forced_channels()
-
-def add_forced_channel(username: str) -> bool:
-    return cache.add_forced_channel(username)
-
-def remove_forced_channel(username: str) -> bool:
-    return cache.remove_forced_channel(username)
-
-def check_user_membership(bot, user_id: int) -> tuple:
-    return cache.check_user_membership(bot, user_id)
-
+# ─── ✅ توابع سایلنت (دیتابیس کش) ──────────────────────────────────────────────
 def add_silent_chat(owner_id: int, chat_id: int):
     cache.add_silent_chat(owner_id, chat_id)
 
@@ -209,56 +185,51 @@ def remove_silent_user(owner_id: int, user_id: int):
 def is_silent_user(owner_id: int, user_id: int) -> bool:
     return cache.is_silent_user(owner_id, user_id)
 
+# ─── ✅ توابع چنل‌های اجباری (دیتابیس کش) ─────────────────────────────────────
+def get_forced_channels():
+    return cache.get_forced_channels()
+
+def add_forced_channel(username: str) -> bool:
+    return cache.add_forced_channel(username)
+
+def remove_forced_channel(username: str) -> bool:
+    return cache.remove_forced_channel(username)
+
+def check_user_membership(bot, user_id: int) -> tuple:
+    return cache.check_user_membership(bot, user_id)
+
 # ─── صادرات ────────────────────────────────────────────────────────────────────
 __all__ = [
+    # حساب‌ها
     'create_account', 'verify_account', 'get_account',
     'get_account_by_username', 'get_account_by_tg_id',
     'get_all_accounts', 'account_exists', 'save_telegram_user_id',
     'get_telegram_id_by_owner',
+    
+    # تنظیمات
     'get_setting', 'set_setting', 'toggle_setting',
     'get_all_logged_in_users', 'init_user_settings',
+    
+    # توکن
     'get_token_balance', 'add_tokens', 'deduct_tokens',
     'claim_daily_token', 'get_token_stats',
     'process_referral', 'get_referral_count',
+    
+    # دشمن
     'add_enemy', 'remove_enemy', 'get_enemies', 'is_enemy', 'clear_enemies', 'get_enemy_count',
+    
+    # دوست
     'add_friend', 'remove_friend', 'get_friends', 'is_friend', 'clear_friends', 'get_friend_count',
+    
+    # پیام
     'save_message_slot', 'get_message_slot',
     'add_scheduled_message', 'get_pending_scheduled', 'mark_scheduled_sent',
     'log_deleted_message', 'get_deleted_messages',
-    'get_forced_channels', 'add_forced_channel', 'remove_forced_channel', 'check_user_membership',
+    
+    # سایلنت
     'add_silent_chat', 'remove_silent_chat', 'is_silent_chat',
     'add_silent_user', 'remove_silent_user', 'is_silent_user',
+    
+    # چنل‌های اجباری
+    'get_forced_channels', 'add_forced_channel', 'remove_forced_channel', 'check_user_membership',
 ]
-# database.py - ادامه فایل
-
-# ─── توابع دیتابیس کش (سایلنت و چنل‌ها) ──────────────────────────────────────
-def get_forced_channels():
-    return cache.get_forced_channels()
-
-def add_forced_channel(username: str) -> bool:
-    return cache.add_forced_channel(username)
-
-def remove_forced_channel(username: str) -> bool:
-    return cache.remove_forced_channel(username)
-
-def check_user_membership(bot, user_id: int) -> tuple:
-    return cache.check_user_membership(bot, user_id)
-
-# ✅ این توابع رو اضافه کنید
-def add_silent_chat(owner_id: int, chat_id: int):
-    cache.add_silent_chat(owner_id, chat_id)
-
-def remove_silent_chat(owner_id: int, chat_id: int):
-    cache.remove_silent_chat(owner_id, chat_id)
-
-def is_silent_chat(owner_id: int, chat_id: int) -> bool:
-    return cache.is_silent_chat(owner_id, chat_id)
-
-def add_silent_user(owner_id: int, user_id: int):
-    cache.add_silent_user(owner_id, user_id)
-
-def remove_silent_user(owner_id: int, user_id: int):
-    cache.remove_silent_user(owner_id, user_id)
-
-def is_silent_user(owner_id: int, user_id: int) -> bool:
-    return cache.is_silent_user(owner_id, user_id)
