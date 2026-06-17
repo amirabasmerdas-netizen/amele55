@@ -11,7 +11,7 @@ from telethon.errors import (
     PhoneCodeExpiredError,
     FloodWaitError,
 )
-import db_supabase as db
+import database_supabase as db
 import db_cache as cache
 import config
 from bot import bot_manager
