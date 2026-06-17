@@ -1,26 +1,51 @@
 import os
+from dotenv import load_dotenv
 
-# ─── تلگرام API ──────────────────────────────────────────────────────────
+load_dotenv()
+
+# ─── تلگرام ──────────────────────────────────────────────────────────────────
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
-
-# ─── پنل وب ──────────────────────────────────────────────────────────────
-SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production")
-ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
-ADMIN_PASS = os.environ.get("ADMIN_PASS", "admin123")
-
-# ─── سیستم الماس ─────────────────────────────────────────────────────────
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-TOKENS_PER_SESSION = int(os.environ.get("TOKENS_PER_SESSION", "10"))
-SESSION_HOURS = int(os.environ.get("SESSION_HOURS", "24"))
-DAILY_TOKEN_GIFT = int(os.environ.get("DAILY_TOKEN_GIFT", "2"))
-REFERRAL_TOKENS = int(os.environ.get("REFERRAL_TOKENS", "5"))
-OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "0"))
+
+# ─── سرور ──────────────────────────────────────────────────────────────────
+SECRET_KEY = os.environ.get("SECRET_KEY", "amel_self55_secret_key_change_me")
+PORT = int(os.environ.get("PORT", 5000))
+SITE_URL = os.environ.get("SITE_URL", "")
+
+# ─── مالک ──────────────────────────────────────────────────────────────────
+OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "8296865861"))
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "amele55")
 OWNER_PHONE = os.environ.get("OWNER_PHONE", "").lstrip("+")
 
-# ─── دیتابیس‌ها (جدید) ───────────────────────────────────────────────────
-DATABASE_URL_PERSISTENT = os.environ.get("DATABASE_URL_PERSISTENT", "")
-DATABASE_URL_TEMP = os.environ.get("DATABASE_URL_TEMP", "")
+# ─── دیتابیس ──────────────────────────────────────────────────────────────
+# دیتابیس پایدار (Supabase PostgreSQL)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+SUPABASE_TABLE_PREFIX = os.environ.get("SUPABASE_TABLE_PREFIX", "amel_")
 
-# ─── گپ مقصد چالش‌ها و جام جهانی ─────────────────────────────────────────
-CHALLENGE_GROUP = os.environ.get("CHALLENGE_GROUP", "@Gp_SelfNexo")
+# دیتابیس موقت (SQLite محلی - برای کش و داده‌های سریع)
+CACHE_DB_PATH = os.environ.get("CACHE_DB_PATH", "cache.db")
+
+# ─── سیستم ──────────────────────────────────────────────────────────────────
+BOT_NAME = "AMEL SELF55"
+BOT_VERSION = "1.2.0"
+WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
+
+# ─── سیستم توکن ──────────────────────────────────────────────────────────────
+TOKENS_PER_SESSION = 2
+SESSION_HOURS = 2
+DAILY_TOKEN_GIFT = 0.5
+REFERRAL_TOKENS = 12
+WELCOME_TOKENS = 10
+TOKEN_PRICE_TOMAN = 200
+
+# ─── اسپانسرها ───────────────────────────────────────────────────────────────
+SPONSORS = [
+    {"username": "pesar777", "name": "اسپانسر اول"},
+    {"username": "ISOLODEVIL", "name": "اسپانسر دوم"},
+]
+
+# ─── کش تنظیمات ──────────────────────────────────────────────────────────────
+# برای کاهش تعداد کوئری‌ها، تنظیمات در حافظه کش می‌شوند
+CACHE_TTL = 60  # ثانیه
