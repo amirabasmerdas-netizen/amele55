@@ -229,3 +229,36 @@ __all__ = [
     'add_silent_chat', 'remove_silent_chat', 'is_silent_chat',
     'add_silent_user', 'remove_silent_user', 'is_silent_user',
 ]
+# database.py - ادامه فایل
+
+# ─── توابع دیتابیس کش (سایلنت و چنل‌ها) ──────────────────────────────────────
+def get_forced_channels():
+    return cache.get_forced_channels()
+
+def add_forced_channel(username: str) -> bool:
+    return cache.add_forced_channel(username)
+
+def remove_forced_channel(username: str) -> bool:
+    return cache.remove_forced_channel(username)
+
+def check_user_membership(bot, user_id: int) -> tuple:
+    return cache.check_user_membership(bot, user_id)
+
+# ✅ این توابع رو اضافه کنید
+def add_silent_chat(owner_id: int, chat_id: int):
+    cache.add_silent_chat(owner_id, chat_id)
+
+def remove_silent_chat(owner_id: int, chat_id: int):
+    cache.remove_silent_chat(owner_id, chat_id)
+
+def is_silent_chat(owner_id: int, chat_id: int) -> bool:
+    return cache.is_silent_chat(owner_id, chat_id)
+
+def add_silent_user(owner_id: int, user_id: int):
+    cache.add_silent_user(owner_id, user_id)
+
+def remove_silent_user(owner_id: int, user_id: int):
+    cache.remove_silent_user(owner_id, user_id)
+
+def is_silent_user(owner_id: int, user_id: int) -> bool:
+    return cache.is_silent_user(owner_id, user_id)
