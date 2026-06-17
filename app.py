@@ -115,20 +115,27 @@ def login():
         return redirect(url_for("index"))
     
     if request.method == "POST":
-        data = request.json or request.form
+        # ✅ پشتیبانی از هر دو نوع: JSON و form-data
+        if request.is_json:
+            data = request.json
+        else:
+            data = request.form
+        
         username = data.get("username", "").strip()
         password = data.get("password", "").strip()
         
         if not username or not password:
+            error_msg = "یوزرنیم و رمز الزامی هستند"
             if request.is_json:
-                return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
-            return render_template("login.html", error="یوزرنیم و رمز الزامی هستند")
+                return jsonify({"ok": False, "error": error_msg}), 400
+            return render_template("login.html", error=error_msg)
         
         oid = db.verify_account(username, password)
         if oid is None:
+            error_msg = "یوزرنیم یا رمز اشتباه است"
             if request.is_json:
-                return jsonify({"ok": False, "error": "یوزرنیم یا رمز اشتباه است"}), 401
-            return render_template("login.html", error="یوزرنیم یا رمز اشتباه است")
+                return jsonify({"ok": False, "error": error_msg}), 401
+            return render_template("login.html", error=error_msg)
         
         session["owner_id"] = oid
         db.init_settings(oid)
@@ -147,30 +154,39 @@ def register():
         return redirect(url_for("index"))
     
     if request.method == "POST":
-        data = request.json or request.form
+        # ✅ پشتیبانی از هر دو نوع: JSON و form-data
+        if request.is_json:
+            data = request.json
+        else:
+            data = request.form
+        
         username = data.get("username", "").strip()
         password = data.get("password", "").strip()
         
         if not username or not password:
+            error_msg = "یوزرنیم و رمز الزامی هستند"
             if request.is_json:
-                return jsonify({"ok": False, "error": "یوزرنیم و رمز الزامی هستند"}), 400
-            return render_template("register.html", error="یوزرنیم و رمز الزامی هستند")
+                return jsonify({"ok": False, "error": error_msg}), 400
+            return render_template("register.html", error=error_msg)
         
         if len(username) < 3:
+            error_msg = "یوزرنیم باید حداقل ۳ کاراکتر باشد"
             if request.is_json:
-                return jsonify({"ok": False, "error": "یوزرنیم باید حداقل ۳ کاراکتر باشد"}), 400
-            return render_template("register.html", error="یوزرنیم باید حداقل ۳ کاراکتر باشد")
+                return jsonify({"ok": False, "error": error_msg}), 400
+            return render_template("register.html", error=error_msg)
         
         if len(password) < 6:
+            error_msg = "رمز باید حداقل ۶ کاراکتر باشد"
             if request.is_json:
-                return jsonify({"ok": False, "error": "رمز باید حداقل ۶ کاراکتر باشد"}), 400
-            return render_template("register.html", error="رمز باید حداقل ۶ کاراکتر باشد")
+                return jsonify({"ok": False, "error": error_msg}), 400
+            return render_template("register.html", error=error_msg)
         
         oid = db.create_account(username, password)
         if oid is None:
+            error_msg = "این یوزرنیم قبلاً ثبت شده"
             if request.is_json:
-                return jsonify({"ok": False, "error": "این یوزرنیم قبلاً ثبت شده"}), 409
-            return render_template("register.html", error="این یوزرنیم قبلاً ثبت شده")
+                return jsonify({"ok": False, "error": error_msg}), 409
+            return render_template("register.html", error=error_msg)
         
         db.init_settings(oid)
         session["owner_id"] = oid
@@ -210,7 +226,13 @@ def tg_login_page():
 @login_required
 def send_code():
     oid = owner_id()
-    data = request.json or {}
+    
+    # ✅ پشتیبانی از هر دو نوع
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form or {}
+    
     phone = data.get("phone", "").strip()
     
     if not phone:
@@ -243,7 +265,13 @@ def send_code():
 @login_required
 def verify_code():
     oid = owner_id()
-    data = request.json or {}
+    
+    # ✅ پشتیبانی از هر دو نوع
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form or {}
+    
     code = data.get("code", "").strip()
     
     if not code:
@@ -288,7 +316,13 @@ def verify_code():
 @login_required
 def verify_2fa():
     oid = owner_id()
-    data = request.json or {}
+    
+    # ✅ پشتیبانی از هر دو نوع
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form or {}
+    
     password = data.get("password", "").strip()
     
     if not password:
@@ -462,7 +496,13 @@ def get_settings():
 @login_required
 def update_settings():
     oid = owner_id()
-    data = request.json or {}
+    
+    # ✅ پشتیبانی از هر دو نوع
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form or {}
+    
     allowed = [
         "secretary_msg", "reaction_emoji", "font",
         "secretary", "anti_delete", "anti_link",
@@ -499,7 +539,12 @@ def toggle(key):
 @login_required
 def api_transfer():
     oid = owner_id()
-    data = request.json or {}
+    
+    # ✅ پشتیبانی از هر دو نوع
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form or {}
     
     username = data.get("username", "").strip().lstrip("@")
     try:
@@ -597,7 +642,12 @@ def admin_give():
     if not account or account.get("telegram_user_id") != config.OWNER_TG_ID:
         return jsonify({"ok": False, "error": "فقط مالک"}), 403
     
-    data = request.json or {}
+    # ✅ پشتیبانی از هر دو نوع
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form or {}
+    
     username = data.get("username", "").strip().lstrip("@")
     
     try:
