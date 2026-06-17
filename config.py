@@ -1,39 +1,26 @@
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
-
-# Telegram API
+# ─── تلگرام API ──────────────────────────────────────────────────────────
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 
-# Supabase (اصلی - پایدار)
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# ─── پنل وب ──────────────────────────────────────────────────────────────
+SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production")
+ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASS = os.environ.get("ADMIN_PASS", "admin123")
 
-# Render DB (سریع - SQLite)
-RENDER_DB_PATH = os.environ.get("RENDER_DB_PATH", "/tmp/fast_cache.db")
-
-# Bot
+# ─── سیستم الماس ─────────────────────────────────────────────────────────
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "8296865861"))
-OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "Amele55")
+TOKENS_PER_SESSION = int(os.environ.get("TOKENS_PER_SESSION", "10"))
+SESSION_HOURS = int(os.environ.get("SESSION_HOURS", "24"))
+DAILY_TOKEN_GIFT = int(os.environ.get("DAILY_TOKEN_GIFT", "2"))
+REFERRAL_TOKENS = int(os.environ.get("REFERRAL_TOKENS", "5"))
+OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "0"))
+OWNER_PHONE = os.environ.get("OWNER_PHONE", "").lstrip("+")
 
-# Channels
-LOTTERY_CHANNEL = os.environ.get("LOTTERY_CHANNEL", "@SelfNexoLottery")
+# ─── دیتابیس‌ها (جدید) ───────────────────────────────────────────────────
+DATABASE_URL_PERSISTENT = os.environ.get("DATABASE_URL_PERSISTENT", "")
+DATABASE_URL_TEMP = os.environ.get("DATABASE_URL_TEMP", "")
 
-# Web
-SECRET_KEY = os.environ.get("SECRET_KEY", "self_nexo_secret_2026")
-PORT = int(os.environ.get("PORT", 5000))
-
-_render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
-SITE_URL = os.environ.get("SITE_URL", f"https://{_render_host}" if _render_host else "")
-
-# Project Info
-BOT_NAME = "سلف ساز | Self Nexo"
-BOT_VERSION = "3.0.0"
-
-# Pricing
-TOKEN_PRICE_TOMAN = 200
-SELF_PRICE = 2  # الماس برای 2 ساعت
-DAILY_GIFT = 1
-REFERRAL_BONUS = 10
+# ─── گپ مقصد چالش‌ها و جام جهانی ─────────────────────────────────────────
+CHALLENGE_GROUP = os.environ.get("CHALLENGE_GROUP", "@Gp_SelfNexo")
