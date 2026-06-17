@@ -6,11 +6,7 @@ import datetime
 import psycopg2
 import psycopg2.extras
 from typing import Optional, Dict, List, Any
-from config import DATABASE_URL, SUPABASE_URL, SUPABASE_KEY, SUPABASE_TABLE_PREFIX
-
-print(f"🔍 DATABASE_URL: {DATABASE_URL[:50]}...")
-print(f"🔍 SUPABASE_URL: {SUPABASE_URL}")
-print(f"🔍 SUPABASE_KEY: {SUPABASE_KEY[:20]}...")
+from config import DATABASE_URL
 
 # ─── اتصال به دیتابیس ──────────────────────────────────────────────────────────
 _conn = None
@@ -19,13 +15,8 @@ def get_conn():
     """دریافت اتصال به دیتابیس با connection pooling"""
     global _conn
     if _conn is None or _conn.closed:
-        try:
-            _conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-            _conn.autocommit = True
-            print("✅ اتصال به دیتابیس برقرار شد!")
-        except Exception as e:
-            print(f"❌ خطا در اتصال به دیتابیس: {e}")
-            raise
+        _conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        _conn.autocommit = True
     return _conn
 
 def execute_query(query: str, params: tuple = None, fetch_one: bool = False, fetch_all: bool = False):
@@ -41,8 +32,6 @@ def execute_query(query: str, params: tuple = None, fetch_one: bool = False, fet
         return cur.rowcount
     except Exception as e:
         print(f"❌ Database error: {e}")
-        print(f"❌ Query: {query}")
-        print(f"❌ Params: {params}")
         raise
     finally:
         cur.close()
@@ -91,30 +80,6 @@ def init_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
-        # جدول دشمن
-        """
-        CREATE TABLE IF NOT EXISTS amel_enemies (
-            id SERIAL PRIMARY KEY,
-            owner_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            username TEXT,
-            name TEXT,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (owner_id, user_id)
-        )
-        """,
-        # جدول دوست
-        """
-        CREATE TABLE IF NOT EXISTS amel_friends (
-            id SERIAL PRIMARY KEY,
-            owner_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            username TEXT,
-            name TEXT,
-            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (owner_id, user_id)
-        )
-        """,
         # جدول پیام‌های ذخیره‌شده
         """
         CREATE TABLE IF NOT EXISTS amel_saved_messages (
@@ -149,31 +114,6 @@ def init_tables():
             media_type TEXT,
             deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """,
-        # ایندکس‌ها برای سرعت بیشتر
-        """
-        CREATE INDEX IF NOT EXISTS idx_amel_settings_owner ON amel_settings(owner_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_amel_enemies_owner ON amel_enemies(owner_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_amel_friends_owner ON amel_friends(owner_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_amel_scheduled_owner ON amel_scheduled_messages(owner_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_amel_scheduled_send ON amel_scheduled_messages(send_at)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_amel_deleted_owner ON amel_deleted_messages(owner_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_amel_referrals_referred ON amel_referrals(referred_tg_id)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_amel_referrals_referrer ON amel_referrals(referrer_owner_id)
         """
     ]
     
@@ -198,8 +138,8 @@ def create_account(username: str, password: str) -> Optional[int]:
             print(f"✅ حساب کاربری {username} با ID {result['id']} ایجاد شد")
             return result['id']
         return None
-    except psycopg2.IntegrityError as e:
-        print(f"❌ خطا: کاربر با این یوزرنیم قبلاً ثبت شده است")
+    except psycopg2.IntegrityError:
+        print(f"❌ خطا: کاربر با یوزرنیم {username} قبلاً ثبت شده است")
         return None
     except Exception as e:
         print(f"❌ create_account error: {e}")
@@ -303,44 +243,29 @@ SETTING_DEFAULTS = {
     "logged_in": "0",
 }
 
-# کش تنظیمات در حافظه
+# کش تنظیمات
 _settings_cache = {}
-_cache_timestamps = {}
-
-def _get_setting_key(owner_id: int, key: str) -> str:
-    return f"{owner_id}:{key}"
 
 def get_setting(owner_id: int, key: str, default=None) -> str:
-    """دریافت تنظیمات با کش کردن برای سرعت بالا"""
-    cache_key = _get_setting_key(owner_id, key)
-    
-    # بررسی کش
+    cache_key = f"{owner_id}:{key}"
     if cache_key in _settings_cache:
-        timestamp = _cache_timestamps.get(cache_key, 0)
-        if datetime.datetime.now().timestamp() - timestamp < 60:  # کش 60 ثانیه
-            return _settings_cache[cache_key]
+        return _settings_cache[cache_key]
     
     try:
         query = "SELECT value FROM amel_settings WHERE owner_id = %s AND key = %s"
         result = execute_query(query, (owner_id, key), fetch_one=True)
         if result:
-            value = result['value']
-            _settings_cache[cache_key] = value
-            _cache_timestamps[cache_key] = datetime.datetime.now().timestamp()
-            return value
-    except Exception as e:
-        print(f"❌ get_setting error: {e}")
+            _settings_cache[cache_key] = result['value']
+            return result['value']
+    except Exception:
+        pass
     
     default_val = SETTING_DEFAULTS.get(key, default)
-    if default_val is not None:
-        _settings_cache[cache_key] = str(default_val)
-        _cache_timestamps[cache_key] = datetime.datetime.now().timestamp()
-    return str(default_val) if default_val is not None else ""
+    _settings_cache[cache_key] = str(default_val) if default_val is not None else ""
+    return _settings_cache[cache_key]
 
 def set_setting(owner_id: int, key: str, value):
-    """تنظیم مقدار با به‌روزرسانی کش"""
     try:
-        # بررسی وجود رکورد
         check_query = "SELECT 1 FROM amel_settings WHERE owner_id = %s AND key = %s"
         exists = execute_query(check_query, (owner_id, key), fetch_one=True)
         
@@ -351,9 +276,7 @@ def set_setting(owner_id: int, key: str, value):
             query = "INSERT INTO amel_settings (owner_id, key, value) VALUES (%s, %s, %s)"
             execute_query(query, (owner_id, key, str(value)))
         
-        cache_key = _get_setting_key(owner_id, key)
-        _settings_cache[cache_key] = str(value)
-        _cache_timestamps[cache_key] = datetime.datetime.now().timestamp()
+        _settings_cache[f"{owner_id}:{key}"] = str(value)
     except Exception as e:
         print(f"❌ set_setting error: {e}")
 
@@ -380,11 +303,7 @@ def init_user_settings(owner_id: int):
 # ─── توکن‌ها ──────────────────────────────────────────────────────────────────
 def _init_tokens(owner_id: int):
     try:
-        query = """
-            INSERT INTO amel_tokens (owner_id, balance, total_earned) 
-            VALUES (%s, 0, 0) 
-            ON CONFLICT (owner_id) DO NOTHING
-        """
+        query = "INSERT INTO amel_tokens (owner_id, balance, total_earned) VALUES (%s, 0, 0) ON CONFLICT (owner_id) DO NOTHING"
         execute_query(query, (owner_id,))
     except Exception as e:
         print(f"❌ _init_tokens error: {e}")
@@ -434,11 +353,7 @@ def claim_daily_token(owner_id: int):
         if result and result['last_daily'] == today:
             return False, "⏰ امروز قبلاً هدیه روزانه دریافت کردید."
         
-        query = """
-            UPDATE amel_tokens 
-            SET balance = balance + %s, total_earned = total_earned + %s, last_daily = %s 
-            WHERE owner_id = %s
-        """
+        query = "UPDATE amel_tokens SET balance = balance + %s, total_earned = total_earned + %s, last_daily = %s WHERE owner_id = %s"
         execute_query(query, (DAILY_TOKEN_GIFT, DAILY_TOKEN_GIFT, today, owner_id))
         return True, f"🎁 {DAILY_TOKEN_GIFT} توکن دریافت کردید!"
     except Exception as e:
@@ -466,19 +381,15 @@ def get_token_stats(owner_id: int) -> dict:
 def process_referral(referrer_owner_id: int, referred_tg_id: int) -> bool:
     from config import REFERRAL_TOKENS
     try:
-        # بررسی اینکه کاربر قبلاً رفرال نشده
         query = "SELECT 1 FROM amel_referrals WHERE referred_tg_id = %s"
         if execute_query(query, (referred_tg_id,), fetch_one=True):
             return False
         
-        # بررسی وجود رفرر
         if not get_account(referrer_owner_id):
             return False
         
         query = "INSERT INTO amel_referrals (referrer_owner_id, referred_tg_id, created_at) VALUES (%s, %s, %s)"
         execute_query(query, (referrer_owner_id, referred_tg_id, datetime.datetime.now().isoformat()))
-        
-        # افزودن توکن
         add_tokens(referrer_owner_id, REFERRAL_TOKENS)
         return True
     except Exception as e:
@@ -494,99 +405,9 @@ def get_referral_count(owner_id: int) -> int:
         print(f"❌ get_referral_count error: {e}")
         return 0
 
-# ─── دشمن ──────────────────────────────────────────────────────────────────
-def add_enemy(owner_id: int, user_id: int, username=None, name=None):
-    try:
-        query = """
-            INSERT INTO amel_enemies (owner_id, user_id, username, name, added_at) 
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (owner_id, user_id) DO UPDATE 
-            SET username = EXCLUDED.username, name = EXCLUDED.name, added_at = EXCLUDED.added_at
-        """
-        execute_query(query, (owner_id, user_id, username, name, datetime.datetime.now().isoformat()))
-        return True
-    except Exception as e:
-        print(f"❌ add_enemy error: {e}")
-        return False
-
-def remove_enemy(owner_id: int, user_id: int) -> bool:
-    try:
-        query = "DELETE FROM amel_enemies WHERE owner_id = %s AND user_id = %s"
-        return execute_query(query, (owner_id, user_id)) > 0
-    except Exception as e:
-        print(f"❌ remove_enemy error: {e}")
-        return False
-
-def get_enemies(owner_id: int) -> List[Dict]:
-    try:
-        query = "SELECT * FROM amel_enemies WHERE owner_id = %s ORDER BY added_at DESC"
-        result = execute_query(query, (owner_id,), fetch_all=True)
-        return [dict(r) for r in result] if result else []
-    except Exception as e:
-        print(f"❌ get_enemies error: {e}")
-        return []
-
-def is_enemy(owner_id: int, user_id: int) -> bool:
-    try:
-        query = "SELECT 1 FROM amel_enemies WHERE owner_id = %s AND user_id = %s"
-        return execute_query(query, (owner_id, user_id), fetch_one=True) is not None
-    except Exception as e:
-        print(f"❌ is_enemy error: {e}")
-        return False
-
-def clear_enemies(owner_id: int):
-    try:
-        query = "DELETE FROM amel_enemies WHERE owner_id = %s"
-        execute_query(query, (owner_id,))
-    except Exception as e:
-        print(f"❌ clear_enemies error: {e}")
-
-# ─── دوست ──────────────────────────────────────────────────────────────────
-def add_friend(owner_id: int, user_id: int, username=None, name=None):
-    try:
-        query = """
-            INSERT INTO amel_friends (owner_id, user_id, username, name, added_at) 
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (owner_id, user_id) DO UPDATE 
-            SET username = EXCLUDED.username, name = EXCLUDED.name, added_at = EXCLUDED.added_at
-        """
-        execute_query(query, (owner_id, user_id, username, name, datetime.datetime.now().isoformat()))
-        return True
-    except Exception as e:
-        print(f"❌ add_friend error: {e}")
-        return False
-
-def remove_friend(owner_id: int, user_id: int) -> bool:
-    try:
-        query = "DELETE FROM amel_friends WHERE owner_id = %s AND user_id = %s"
-        return execute_query(query, (owner_id, user_id)) > 0
-    except Exception as e:
-        print(f"❌ remove_friend error: {e}")
-        return False
-
-def get_friends(owner_id: int) -> List[Dict]:
-    try:
-        query = "SELECT * FROM amel_friends WHERE owner_id = %s ORDER BY added_at DESC"
-        result = execute_query(query, (owner_id,), fetch_all=True)
-        return [dict(r) for r in result] if result else []
-    except Exception as e:
-        print(f"❌ get_friends error: {e}")
-        return []
-
-def is_friend(owner_id: int, user_id: int) -> bool:
-    try:
-        query = "SELECT 1 FROM amel_friends WHERE owner_id = %s AND user_id = %s"
-        return execute_query(query, (owner_id, user_id), fetch_one=True) is not None
-    except Exception as e:
-        print(f"❌ is_friend error: {e}")
-        return False
-
-def clear_friends(owner_id: int):
-    try:
-        query = "DELETE FROM amel_friends WHERE owner_id = %s"
-        execute_query(query, (owner_id,))
-    except Exception as e:
-        print(f"❌ clear_friends error: {e}")
+# ─── ⚠️ توابع دشمن و دوست به دیتابیس کش منتقل شدند ⚠️ ──────────────────────
+# این توابع دیگر در Supabase ذخیره نمی‌شوند و به db_cache منتقل شده‌اند
+# برای استفاده از آنها، از فایل database.py استفاده کنید که به db_cache متصل است
 
 # ─── پیام‌های ذخیره‌شده ──────────────────────────────────────────────────
 def save_message_slot(owner_id: int, slot: int, content, media_path=None):
@@ -594,8 +415,7 @@ def save_message_slot(owner_id: int, slot: int, content, media_path=None):
         query = """
             INSERT INTO amel_saved_messages (owner_id, slot, content, media_path, saved_at) 
             VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (owner_id, slot) DO UPDATE 
-            SET content = EXCLUDED.content, media_path = EXCLUDED.media_path, saved_at = EXCLUDED.saved_at
+            ON CONFLICT (owner_id, slot) DO UPDATE SET content = EXCLUDED.content, media_path = EXCLUDED.media_path, saved_at = EXCLUDED.saved_at
         """
         execute_query(query, (owner_id, slot, content, media_path, datetime.datetime.now().isoformat()))
     except Exception as e:
@@ -670,79 +490,7 @@ def get_deleted_messages(owner_id: int, limit=50):
         print(f"❌ get_deleted_messages error: {e}")
         return []
 
-# ─── کلاس SupabaseDB برای API REST ──────────────────────────────────────────
-class SupabaseDB:
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init()
-        return cls._instance
-    
-    def _init(self):
-        self.url = SUPABASE_URL.rstrip('/') if SUPABASE_URL else ''
-        self.key = SUPABASE_KEY
-        self.headers = {
-            "apikey": self.key,
-            "Authorization": f"Bearer {self.key}",
-            "Content-Type": "application/json"
-        }
-        self.prefix = SUPABASE_TABLE_PREFIX or "amel_"
-        print(f"✅ SupabaseDB initialized with URL: {self.url}")
-    
-    def _request(self, method: str, table: str, data: dict = None, 
-                 params: dict = None, match: dict = None) -> List[Dict]:
-        """درخواست به Supabase REST API"""
-        if not self.url or not self.key:
-            print("❌ SUPABASE_URL یا SUPABASE_KEY تنظیم نشده")
-            return []
-            
-        url = f"{self.url}/rest/v1/{table}"
-        headers = self.headers.copy()
-        
-        if method.upper() in ['POST', 'PATCH']:
-            headers["Prefer"] = "return=representation"
-        
-        # ساخت query params
-        query_parts = []
-        if params:
-            for key, value in params.items():
-                query_parts.append(f"{key}={value}")
-        
-        if match:
-            for key, value in match.items():
-                query_parts.append(f"{key}=eq.{value}")
-        
-        if query_parts:
-            url += "?" + "&".join(query_parts)
-        
-        try:
-            import requests
-            if method.upper() == 'GET':
-                response = requests.get(url, headers=headers, timeout=10)
-            elif method.upper() == 'POST':
-                response = requests.post(url, headers=headers, json=data, timeout=10)
-            elif method.upper() == 'PATCH':
-                response = requests.patch(url, headers=headers, json=data, timeout=10)
-            elif method.upper() == 'DELETE':
-                response = requests.delete(url, headers=headers, timeout=10)
-            else:
-                return []
-            
-            if response.status_code in [200, 201, 204]:
-                if response.text and response.text.strip():
-                    return response.json()
-                return []
-            else:
-                print(f"❌ Supabase REST error: {response.status_code} - {response.text}")
-                return []
-        except Exception as e:
-            print(f"❌ Supabase REST request error: {e}")
-            return []
-
 # ─── مقداردهی اولیه ──────────────────────────────────────────────────────────
-# ایجاد جداول در هنگام import
 try:
     init_tables()
 except Exception as e:
