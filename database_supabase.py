@@ -4,40 +4,40 @@ import psycopg2.pool
 import hashlib
 import threading
 import time as _time
-from config import SUPABASE_URL
+from config import DATABASE_URL
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Connection Pool
+#  Connection Pooling
 # ══════════════════════════════════════════════════════════════════════════════
-_pool = None
+_connection_pool = None
 _pool_lock = threading.Lock()
 
 
 def _get_pool():
-    global _pool
-    if _pool is None:
+    global _connection_pool
+    if _connection_pool is None:
         with _pool_lock:
-            if _pool is None:
+            if _connection_pool is None:
                 try:
-                    _pool = psycopg2.pool.ThreadedConnectionPool(
+                    _connection_pool = psycopg2.pool.ThreadedConnectionPool(
                         minconn=5,
                         maxconn=20,
-                        dsn=SUPABASE_URL,
+                        dsn=DATABASE_URL,
                         connect_timeout=3,
                     )
                     print("✅ Supabase pool ایجاد شد")
                 except Exception as e:
-                    print(f" خطا Supabase: {e}")
+                    print(f"❌ خطا: {e}")
                     raise
-    return _pool
+    return _connection_pool
 
 
 def get_conn():
     try:
         return _get_pool().getconn()
     except:
-        return psycopg2.connect(SUPABASE_URL, connect_timeout=3)
+        return psycopg2.connect(DATABASE_URL, connect_timeout=3)
 
 
 def release_conn(conn):
@@ -55,7 +55,7 @@ def _hash_pw(password: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Cache
+# 🚀 Cache System
 # ══════════════════════════════════════════════════════════════════════════════
 class FastCache:
     def __init__(self, ttl=300):
@@ -64,22 +64,20 @@ class FastCache:
         self._ttl = ttl
         self._lock = threading.Lock()
     
-    def get(self, key):
-        import time
+    def get(self, key, default=None):
         with self._lock:
             if key in self._cache:
-                if time.time() - self._timestamps[key] < self._ttl:
+                if _time.time() - self._timestamps[key] < self._ttl:
                     return self._cache[key]
                 else:
                     del self._cache[key]
                     del self._timestamps[key]
-        return None
+        return default
     
     def set(self, key, value):
-        import time
         with self._lock:
             self._cache[key] = value
-            self._timestamps[key] = time.time()
+            self._timestamps[key] = _time.time()
     
     def invalidate(self, key):
         with self._lock:
@@ -89,18 +87,18 @@ class FastCache:
 
 account_cache = FastCache(ttl=600)
 balance_cache = FastCache(ttl=60)
-session_cache = FastCache(ttl=3600)  # 1 ساعت cache برای سشن
+session_cache = FastCache(ttl=3600)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Init DB - با جدول Sessions
+# ══════════════════════════════════════════════════════════════════════════════
+# Init DB - فقط 3 جدول اصلی
 # ══════════════════════════════════════════════════════════════════════════════
 def init_db():
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Accounts table
+        # Accounts - با balance مستقیم
         c.execute("""CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
@@ -110,7 +108,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
 
-        # Settings table
+        # Settings
         c.execute("""CREATE TABLE IF NOT EXISTS settings (
             owner_id BIGINT NOT NULL,
             key TEXT NOT NULL,
@@ -118,9 +116,7 @@ def init_db():
             PRIMARY KEY (owner_id, key)
         )""")
 
-        # ═══════════════════════════════════════════════════════════════════
-        # Sessions table - برای ذخیره سشن‌های تلگرام
-        # ═══════════════════════════════════════════════════════════════════
+        # Sessions - برای ذخیره سشن‌های تلگرام
         c.execute("""CREATE TABLE IF NOT EXISTS sessions (
             owner_id BIGINT PRIMARY KEY,
             session_data TEXT NOT NULL,
@@ -137,7 +133,7 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_sess_active ON sessions(is_active)")
 
         conn.commit()
-        print("✅ Supabase آماده شد (با جدول sessions)")
+        print("✅ Supabase آماده شد")
     finally:
         release_conn(conn)
 
@@ -242,6 +238,16 @@ def save_telegram_user_id(owner_id: int, tg_user_id: int):
         release_conn(conn)
 
 
+def get_all_accounts():
+    conn = get_conn()
+    try:
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT id, username, balance, created_at FROM accounts ORDER BY created_at DESC")
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        release_conn(conn)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Balance
 # ══════════════════════════════════════════════════════════════════════════════
@@ -312,12 +318,12 @@ def transfer_balance(from_id: int, to_id: int, amount: int) -> tuple:
         balance_cache.invalidate(f"balance:{to_id}")
         return True, f"✅ {amount} الماس انتقال یافت"
     except Exception as e:
-        return False, f"❌ خطا: {e}"
+        return False, f" خطا: {e}"
     finally:
         release_conn(conn)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # Settings
 # ══════════════════════════════════════════════════════════════════════════════
 SETTING_DEFAULTS = {
@@ -366,21 +372,10 @@ def set_setting(owner_id: int, key: str, value):
         release_conn(conn)
 
 
-def get_all_accounts():
-    conn = get_conn()
-    try:
-        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        c.execute("SELECT id, username, balance, created_at FROM accounts ORDER BY created_at DESC")
-        return [dict(r) for r in c.fetchall()]
-    finally:
-        release_conn(conn)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 🚀 Sessions - ذخیره در Supabase (پایدار)
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
+#  Sessions - ذخیره در Supabase
+# ═════════════════════════════════════════════════════════════════════════════
 def save_session(owner_id: int, session_data: str, phone: str = None):
-    """ذخیره سشن تلگرام در Supabase"""
     cache_key = f"session:{owner_id}"
     
     conn = get_conn()
@@ -395,22 +390,18 @@ def save_session(owner_id: int, session_data: str, phone: str = None):
                                    updated_at = CURRENT_TIMESTAMP""",
                   (owner_id, session_data, phone))
         conn.commit()
-        
-        # Update cache
         session_cache.set(cache_key, session_data)
         return True
     except Exception as e:
-        print(f"❌ خطا در ذخیره سشن: {e}")
+        print(f" خطا در ذخیره سشن: {e}")
         return False
     finally:
         release_conn(conn)
 
 
 def get_session(owner_id: int) -> str:
-    """دریافت سشن تلگرام از Supabase"""
     cache_key = f"session:{owner_id}"
     
-    # Check cache first
     cached = session_cache.get(cache_key)
     if cached:
         return cached
@@ -431,7 +422,6 @@ def get_session(owner_id: int) -> str:
 
 
 def delete_session(owner_id: int):
-    """حذف سشن (logout)"""
     cache_key = f"session:{owner_id}"
     
     conn = get_conn()
@@ -439,19 +429,16 @@ def delete_session(owner_id: int):
         c = conn.cursor()
         c.execute("UPDATE sessions SET is_active = FALSE WHERE owner_id = %s", (owner_id,))
         conn.commit()
-        
-        # Invalidate cache
         session_cache.invalidate(cache_key)
         return True
     except Exception as e:
-        print(f"❌ خطا در حذف سشن: {e}")
+        print(f" خطا در حذف سشن: {e}")
         return False
     finally:
         release_conn(conn)
 
 
 def get_all_active_sessions():
-    """دریافت همه سشن‌های فعال (برای استارت بعد از ری‌استارت)"""
     conn = get_conn()
     try:
         c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -466,10 +453,8 @@ def get_all_active_sessions():
 
 
 def is_session_active(owner_id: int) -> bool:
-    """بررسی فعال بودن سشن"""
     cache_key = f"session:{owner_id}"
     
-    # Check cache
     cached = session_cache.get(cache_key)
     if cached:
         return True
