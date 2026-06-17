@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+import re
 
 load_dotenv()
 
@@ -19,30 +20,29 @@ OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "amele55")
 OWNER_PHONE = os.environ.get("OWNER_PHONE", "").lstrip("+")
 
 # ─── دیتابیس پایدار (Supabase PostgreSQL) ──────────────────────────────────
-# ✅ استفاده از DATABASE_URL مستقیم
-import urllib.parse
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-# برای سازگاری با هر دو روش
+# ✅ استخراج صحیح SUPABASE_URL از DATABASE_URL
 if DATABASE_URL:
-    # استخراج اطلاعات از DATABASE_URL
-    import re
-    # مثال: postgresql://postgres.vijfkltyashuzhqcecff:Amirabas00v89%40@aws-0-eu-west-1.pooler.supabase.com:6543/postgres
+    # postgresql://postgres.vijfkltyashuzhqcecff:Amirabas00v89%40@aws-0-eu-west-1.pooler.supabase.com:6543/postgres
     match = re.search(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
     if match:
         user, password, host, port, dbname = match.groups()
-        SUPABASE_URL = f"https://{host.split('.')[0]}.supabase.co"  # استخراج Project ID
-        SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+        # استخراج Project ID از host
+        # host: aws-0-eu-west-1.pooler.supabase.com
+        # Project ID: vijfkltyashuzhqcecff (از user)
+        project_id = user.split('.')[-1] if '.' in user else user
+        SUPABASE_URL = f"https://{project_id}.supabase.co"
+        print(f"✅ استخراج SUPABASE_URL: {SUPABASE_URL}")
     else:
         SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-        SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 else:
     SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 SUPABASE_TABLE_PREFIX = os.environ.get("SUPABASE_TABLE_PREFIX", "amel_")
 
-# ─── دیتابیس موقت (SQLite) ──────────────────────────────────────────────────
+# ─── دیتابیس موقت ──────────────────────────────────────────────────────────
 CACHE_DB_PATH = os.environ.get("CACHE_DB_PATH", "cache.db")
 
 # ─── سیستم ──────────────────────────────────────────────────────────────────
