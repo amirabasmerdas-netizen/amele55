@@ -1,5 +1,4 @@
 import database_supabase as supa
-import database_render as render
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -7,11 +6,10 @@ import database_render as render
 # ══════════════════════════════════════════════════════════════════════════════
 def init_db():
     supa.init_db()
-    render.init_db()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Accounts (Supabase)
+# Accounts
 # ══════════════════════════════════════════════════════════════════════════════
 def create_account(username: str, password: str):
     return supa.create_account(username, password)
@@ -42,7 +40,7 @@ def get_all_accounts():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Balance (Supabase)
+# Balance
 # ══════════════════════════════════════════════════════════════════════════════
 def get_balance(owner_id: int):
     return supa.get_balance(owner_id)
@@ -61,7 +59,7 @@ def transfer_balance(from_id: int, to_id: int, amount: int):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Settings (Supabase)
+# Settings
 # ══════════════════════════════════════════════════════════════════════════════
 def init_settings(owner_id: int):
     return supa.init_settings(owner_id)
@@ -76,7 +74,7 @@ def set_setting(owner_id: int, key: str, value):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Sessions (Supabase)
+# Sessions
 # ══════════════════════════════════════════════════════════════════════════════
 def save_session(owner_id: int, session_data: str, phone: str = None):
     return supa.save_session(owner_id, session_data, phone)
@@ -99,57 +97,99 @@ def is_session_active(owner_id: int):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Lotteries (Render - Fast)
+# 🆕 دشمن
 # ══════════════════════════════════════════════════════════════════════════════
-def create_lottery(chat_id: str, creator_id: int, prize: int, entry_fee: int = 1, duration_min: int = 120):
-    return render.create_lottery(chat_id, creator_id, prize, entry_fee, duration_min)
+def add_enemy(owner_id: int, user_id: int, username=None, name=None):
+    return supa.add_enemy(owner_id, user_id, username, name)
 
 
-def join_lottery(lottery_id: int, user_id: int, amount: int):
-    return render.join_lottery(lottery_id, user_id, amount)
+def remove_enemy(owner_id: int, user_id: int):
+    return supa.remove_enemy(owner_id, user_id)
 
 
-def get_lottery_participants(lottery_id: int):
-    return render.get_lottery_participants(lottery_id)
+def get_enemies(owner_id: int):
+    return supa.get_enemies(owner_id)
 
 
-def finish_lottery(lottery_id: int):
-    return render.finish_lottery(lottery_id)
+def is_enemy(owner_id: int, user_id: int):
+    return supa.is_enemy(owner_id, user_id)
 
 
-def get_active_lotteries():
-    return render.get_active_lotteries()
-
-
-def get_expired_lotteries():
-    return render.get_expired_lotteries()
+def clear_enemies(owner_id: int):
+    return supa.clear_enemies(owner_id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Challenges (Render - Fast)
+# 🆕 دوست
 # ══════════════════════════════════════════════════════════════════════════════
-def create_challenge(team1: str, team2: str, match_time: str, bet_amount: int):
-    return render.create_challenge(team1, team2, match_time, bet_amount)
+def add_friend(owner_id: int, user_id: int, username=None, name=None):
+    return supa.add_friend(owner_id, user_id, username, name)
 
 
-def place_bet(challenge_id: int, user_id: int, team: str, amount: int):
-    return render.place_bet(challenge_id, user_id, team, amount)
+def remove_friend(owner_id: int, user_id: int):
+    return supa.remove_friend(owner_id, user_id)
 
 
-def get_challenge_bets(challenge_id: int):
-    return render.get_challenge_bets(challenge_id)
+def get_friends(owner_id: int):
+    return supa.get_friends(owner_id)
 
 
-def settle_challenge(challenge_id: int, winner_team: str):
-    return render.settle_challenge(challenge_id, winner_team)
+def is_friend(owner_id: int, user_id: int):
+    return supa.is_friend(owner_id, user_id)
 
 
-def get_active_challenges():
-    return render.get_active_challenges()
+def clear_friends(owner_id: int):
+    return supa.clear_friends(owner_id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Transactions (Render - Fast)
+# 🆕 سایلنت
 # ══════════════════════════════════════════════════════════════════════════════
-def log_transaction(from_id: int, to_id: int, amount: int, type_: str):
-    return render.log_transaction(from_id, to_id, amount, type_)
+def add_silent_chat(owner_id: int, chat_id: int):
+    return supa.add_silent_chat(owner_id, chat_id)
+
+
+def remove_silent_chat(owner_id: int, chat_id: int):
+    return supa.remove_silent_chat(owner_id, chat_id)
+
+
+def is_silent_chat(owner_id: int, chat_id: int):
+    return supa.is_silent_chat(owner_id, chat_id)
+
+
+def add_silent_user(owner_id: int, user_id: int):
+    return supa.add_silent_user(owner_id, user_id)
+
+
+def remove_silent_user(owner_id: int, user_id: int):
+    return supa.remove_silent_user(owner_id, user_id)
+
+
+def is_silent_user(owner_id: int, user_id: int):
+    return supa.is_silent_user(owner_id, user_id)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 پیام‌های ذخیره‌شده
+# ══════════════════════════════════════════════════════════════════════════════
+def save_message_slot(owner_id: int, slot: int, content: str):
+    return supa.save_message_slot(owner_id, slot, content)
+
+
+def get_message_slot(owner_id: int, slot: int):
+    return supa.get_message_slot(owner_id, slot)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🆕 پیام‌های زمان‌بندی‌شده
+# ══════════════════════════════════════════════════════════════════════════════
+def add_scheduled_message(owner_id: int, chat_id: int, message: str, send_at: str):
+    return supa.add_scheduled_message(owner_id, chat_id, message, send_at)
+
+
+def get_pending_scheduled(owner_id: int):
+    return supa.get_pending_scheduled(owner_id)
+
+
+def mark_scheduled_sent(msg_id: int):
+    return supa.mark_scheduled_sent(msg_id)
