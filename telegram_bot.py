@@ -36,11 +36,10 @@ class SmartCache:
             self._data.clear()
             self._timestamps.clear()
         else:
-            keys_to_del = [k for k in self._data if k.startswith(pattern)]
+            keys_to_del = [k for k in list(self._data.keys()) if k.startswith(pattern)]
             for k in keys_to_del:
-                del self._data[k]
-                if k in self._timestamps:
-                    del self._timestamps[k]
+                self._data.pop(k, None)
+                self._timestamps.pop(k, None)
     
     def _get_ttl(self, key):
         if key.startswith("membership_"):
@@ -57,7 +56,7 @@ class SmartCache:
 
 cache = SmartCache()
 _owner_states = {}
-_lottery_players = {}  # {lottery_id: [user_ids]}
+_lottery_players = {}
 
 
 def get_bot():
@@ -69,10 +68,14 @@ def _check_membership_cached(user_id):
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-    is_member, missing = db.check_user_membership(_bot, user_id)
-    result = (is_member, missing)
-    cache.set(cache_key, result)
-    return result
+    try:
+        is_member, missing = db.check_user_membership(_bot, user_id)
+        result = (is_member, missing)
+        cache.set(cache_key, result)
+        return result
+    except Exception as e:
+        print(f"⚠️ خطا در بررسی عضویت: {e}")
+        return True, []
 
 
 def _get_account_cached(tg_id):
@@ -130,6 +133,9 @@ def start_token_bot():
         )
 
     def require_membership(message):
+        """بررسی عضویت - در گروه‌ها فقط در PV چک می‌شود"""
+        if message.chat.type != 'private':
+            return True  # در گروه‌ها چک نکن
         is_member, missing = _check_membership_cached(message.from_user.id)
         if not is_member:
             send_forced_channels_menu(message, missing)
@@ -167,13 +173,15 @@ def start_token_bot():
         return markup
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 📝 دستور قرعه‌کشی برای کاربران
+    # 📝 دستور قرعه‌کشی برای کاربران (در گروه و پیوی)
     # ══════════════════════════════════════════════════════════════════════════
-    @_bot.message_handler(func=lambda m: m.text and m.text.startswith("قرعه "), chat_types=['private', 'group'])
+    @_bot.message_handler(func=lambda m: m.text and m.text.startswith("قرعه "), chat_types=['private', 'group', 'supergroup'])
     def cmd_lottery(message):
         try:
-            if not require_membership(message):
-                return
+            # ✅ در گروه‌ها فقط اگر کاربر ثبت‌نام کرده باشد
+            account = _get_account_cached(message.from_user.id)
+            if not account:
+                return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.")
             
             parts = message.text.split()
             if len(parts) < 2:
@@ -186,10 +194,6 @@ def start_token_bot():
             except:
                 return _bot.reply_to(message, "❌ مبلغ باید عدد باشد.")
             
-            account = _get_account_cached(message.from_user.id)
-            if not account:
-                return _bot.reply_to(message, "⚠️ ابتدا در پنل وب ثبت‌نام کنید.")
-            
             # بررسی موجودی سازنده
             balance = db.get_token_balance(account["id"])
             if balance < prize:
@@ -199,12 +203,13 @@ def start_token_bot():
             if not db.deduct_tokens(account["id"], prize):
                 return _bot.reply_to(message, "❌ خطا در کسر الماس!")
             
-            # ایجاد قرعه‌کشی
+            # ✅ ایجاد قرعه‌کشی در همان چت (گروه یا پیوی)
             lottery_id = db.create_lottery(
                 chat_id=message.chat.id,
                 creator_tg_id=message.from_user.id,
                 prize_amount=prize,
-                duration_minutes=2
+                duration_minutes=2,
+                entry_fee=prize
             )
             
             # ثبت سازنده
@@ -219,10 +224,12 @@ def start_token_bot():
                 )
             )
             
+            creator_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+            
             msg = _bot.reply_to(
                 message,
                 f"🎉 <b>قرعه‌کشی!</b>\n\n"
-                f"👤 سازنده: @{message.from_user.username or message.from_user.first_name}\n"
+                f"👤 سازنده: {creator_name}\n"
                 f"💎 مبلغ ورودی: <b>{prize} الماس</b>\n"
                 f"💰 مجموع جایزه: <b>{prize * 2} الماس</b>\n"
                 f"👥 شرکت‌کنندگان: ۱ نفر\n\n"
@@ -263,12 +270,9 @@ def start_token_bot():
     # ══════════════════════════════════════════════════════════════════════════
     # 💎 انتقال الماس بین کاربران
     # ══════════════════════════════════════════════════════════════════════════
-    @_bot.message_handler(func=lambda m: m.text and m.text.startswith("انتقال "), chat_types=['private', 'group'])
+    @_bot.message_handler(func=lambda m: m.text and m.text.startswith("انتقال "), chat_types=['private', 'group', 'supergroup'])
     def cmd_transfer(message):
         try:
-            if not require_membership(message):
-                return
-            
             parts = message.text.split()
             if len(parts) < 3:
                 return _bot.reply_to(message, "❗ فرمت: انتقال [یوزرنیم] [تعداد]\nمثال: انتقال @ali 10")
@@ -313,7 +317,7 @@ def start_token_bot():
             _bot.reply_to(message, f"❌ خطا: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 🎲 Callback: شرکت در قرعه‌کشی
+    # 🎲 Callback: شرکت در قرعه‌کشی (قبل از callback_admin ثبت شود!)
     # ══════════════════════════════════════════════════════════════════════════
     @_bot.callback_query_handler(func=lambda call: call.data.startswith("join_lottery_"))
     def callback_join_lottery(call):
@@ -388,6 +392,35 @@ def start_token_bot():
             print(f"❌ خطا در callback_join_lottery: {e}")
             _bot.answer_callback_query(call.id, f"❌ خطا: {str(e)[:100]}", show_alert=True)
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 🏆 Callback: شرط‌بندی جام جهانی (قبل از callback_admin!)
+    # ══════════════════════════════════════════════════════════════════════════
+    @_bot.callback_query_handler(func=lambda call: call.data.startswith("bet_wc_"))
+    def callback_bet_wc(call):
+        try:
+            parts = call.data.split("_", 3)
+            challenge_id = int(parts[2])
+            team_choice = parts[3]
+            
+            cache_key = f"challenge_{challenge_id}"
+            challenge = cache.get(cache_key)
+            if challenge is None:
+                challenge = db.get_challenge(challenge_id)
+                if challenge:
+                    cache.set(cache_key, challenge)
+            
+            if not challenge or challenge["status"] != "active":
+                return _bot.answer_callback_query(call.id, "❌ این چالش فعال نیست.", show_alert=True)
+            
+            account = _get_account_cached(call.from_user.id)
+            if not account:
+                return _bot.answer_callback_query(call.id, "❌ ابتدا در پنل وب ثبت‌نام کنید.", show_alert=True)
+            
+            success, msg = db.place_bet(challenge_id, call.from_user.id, account["id"], team_choice, challenge["bet_amount"])
+            _bot.answer_callback_query(call.id, msg, show_alert=True)
+        except Exception as e:
+            print(f"❌ خطا در callback_bet_wc: {e}")
+
     # ─── پایان فوری قرعه‌کشی ──────────────────────────────────────────────────
     def _finish_lottery_immediately(lottery_id, chat_id):
         try:
@@ -399,12 +432,9 @@ def start_token_bot():
             if len(participants) < 2:
                 return
             
-            # مجموع جایزه = ورودی نفر اول + ورودی نفر دوم
             total_prize = lottery["prize_amount"] * 2
-            
             winner = random.choice(participants)
             
-            # واریز به برنده
             db.add_tokens(winner["owner_id"], total_prize)
             db.finish_lottery(lottery_id, winner["user_tg_id"], winner["owner_id"])
             
@@ -679,9 +709,9 @@ def start_token_bot():
             reply_markup=_admin_panel_keyboard())
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 🎯 Callback handler پنل مدیریت
+    # 🎯 Callback handler پنل مدیریت (فقط admin_ و rmch_ و wcwin_)
     # ══════════════════════════════════════════════════════════════════════════
-    @_bot.callback_query_handler(func=lambda call: call.data.startswith("admin_") or call.data.startswith("rmch_") or call.data.startswith("wcwin_") or call.data.startswith("bet_wc_"))
+    @_bot.callback_query_handler(func=lambda call: call.data.startswith("admin_") or call.data.startswith("rmch_") or call.data.startswith("wcwin_") or call.data.startswith("wc_") or call.data == "addch_prompt")
     def callback_admin(call):
         if call.from_user.id != OWNER_TG_ID:
             return _bot.answer_callback_query(call.id, "❌ فقط مالک دسترسی دارد", show_alert=True)
@@ -851,8 +881,7 @@ def start_token_bot():
                     "🎲 <b>ایجاد قرعه‌کشی گروهی (مالک)</b>\n\n"
                     "💎 مبلغ جایزه را ارسال کنید (الماس):\n\n"
                     "مثال: <code>100</code>\n\n"
-                    "📌 هر شرکت‌کننده به اندازه جایزه پرداخت می‌کند\n"
-                    "📌 مجموع جایزه = ۲ × مبلغ ورودی",
+                    "📌 قرعه‌کشی در گروه <code>@amelselfgap</code> ایجاد می‌شود",
                     chat_id=call.message.chat.id,
                     message_id=call.message.message_id,
                     reply_markup=markup
@@ -975,16 +1004,16 @@ def start_token_bot():
                 except:
                     return _bot.reply_to(message, "❌ مبلغ باید عدد باشد:")
                 
-                # قرعه‌کشی مالک در گروه فعلی
-                chat_id = message.chat.id
-                lottery_id = db.create_lottery(chat_id, OWNER_TG_ID, prize, 2)
+                # ✅ قرعه‌کشی مالک در گروه WORLD_CUP_GROUP
+                group = getattr(config, 'WORLD_CUP_GROUP', '@amelselfgap')
+                lottery_id = db.create_lottery(0, OWNER_TG_ID, prize, 2, prize)
                 
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton(f"🎲 شرکت در قرعه‌کشی ({prize} الماس)", callback_data=f"join_lottery_{lottery_id}"))
                 _lottery_players[lottery_id] = []
                 
                 try:
-                    msg = _bot.send_message(chat_id,
+                    msg = _bot.send_message(group,
                         f"🎉 <b>قرعه‌کشی ویژه (مالک)!</b>\n\n"
                         f"💎 مبلغ ورودی: <b>{prize} الماس</b>\n"
                         f"💰 مجموع جایزه: <b>{prize * 2} الماس</b>\n\n"
@@ -992,14 +1021,14 @@ def start_token_bot():
                         reply_markup=markup)
                     db.update_lottery_message(lottery_id, msg.message_id)
                     _bot.reply_to(message, 
-                        f"✅ قرعه‌کشی ایجاد شد!\n\n"
+                        f"✅ قرعه‌کشی در گروه {group} ایجاد شد!\n\n"
                         f"💎 جایزه: {prize} الماس\n"
                         f"📢 ID: <code>{lottery_id}</code>",
                         reply_markup=_owner_keyboard())
                     
-                    threading.Timer(120, _auto_finish_lottery, args=[lottery_id, chat_id]).start()
+                    threading.Timer(120, _auto_finish_lottery, args=[lottery_id, group]).start()
                 except Exception as e:
-                    _bot.reply_to(message, f"❌ خطا: {e}", reply_markup=_owner_keyboard())
+                    _bot.reply_to(message, f"❌ خطا: {e}\nمطمئن شوید ربات در {group} ادمین است.", reply_markup=_owner_keyboard())
                 
                 _owner_states.pop(message.from_user.id, None)
             
@@ -1075,35 +1104,6 @@ def start_token_bot():
             print(f"❌ خطا در handle_owner_state: {e}")
             _bot.reply_to(message, f"❌ خطا: {e}", reply_markup=_owner_keyboard())
             _owner_states.pop(message.from_user.id, None)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # 🏆 Callback: شرط‌بندی جام جهانی
-    # ══════════════════════════════════════════════════════════════════════════
-    @_bot.callback_query_handler(func=lambda call: call.data.startswith("bet_wc_"))
-    def callback_bet_wc(call):
-        try:
-            parts = call.data.split("_", 3)
-            challenge_id = int(parts[2])
-            team_choice = parts[3]
-            
-            cache_key = f"challenge_{challenge_id}"
-            challenge = cache.get(cache_key)
-            if challenge is None:
-                challenge = db.get_challenge(challenge_id)
-                if challenge:
-                    cache.set(cache_key, challenge)
-            
-            if not challenge or challenge["status"] != "active":
-                return _bot.answer_callback_query(call.id, "❌ این چالش فعال نیست.", show_alert=True)
-            
-            account = _get_account_cached(call.from_user.id)
-            if not account:
-                return _bot.answer_callback_query(call.id, "❌ ابتدا در پنل وب ثبت‌نام کنید.", show_alert=True)
-            
-            success, msg = db.place_bet(challenge_id, call.from_user.id, account["id"], team_choice, challenge["bet_amount"])
-            _bot.answer_callback_query(call.id, msg, show_alert=True)
-        except Exception as e:
-            print(f"❌ خطا در callback_bet_wc: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # دستورات متنی قدیمی
