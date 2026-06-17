@@ -18,13 +18,31 @@ OWNER_TG_ID = int(os.environ.get("OWNER_TG_ID", "8296865861"))
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "amele55")
 OWNER_PHONE = os.environ.get("OWNER_PHONE", "").lstrip("+")
 
-# ─── دیتابیس ──────────────────────────────────────────────────────────────
-# دیتابیس پایدار (Supabase PostgreSQL)
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+# ─── دیتابیس پایدار (Supabase PostgreSQL) ──────────────────────────────────
+# ✅ استفاده از DATABASE_URL مستقیم
+import urllib.parse
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+# برای سازگاری با هر دو روش
+if DATABASE_URL:
+    # استخراج اطلاعات از DATABASE_URL
+    import re
+    # مثال: postgresql://postgres.vijfkltyashuzhqcecff:Amirabas00v89%40@aws-0-eu-west-1.pooler.supabase.com:6543/postgres
+    match = re.search(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', DATABASE_URL)
+    if match:
+        user, password, host, port, dbname = match.groups()
+        SUPABASE_URL = f"https://{host.split('.')[0]}.supabase.co"  # استخراج Project ID
+        SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+    else:
+        SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+        SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+else:
+    SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+    SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+
 SUPABASE_TABLE_PREFIX = os.environ.get("SUPABASE_TABLE_PREFIX", "amel_")
 
-# دیتابیس موقت (SQLite محلی - برای کش و داده‌های سریع)
+# ─── دیتابیس موقت (SQLite) ──────────────────────────────────────────────────
 CACHE_DB_PATH = os.environ.get("CACHE_DB_PATH", "cache.db")
 
 # ─── سیستم ──────────────────────────────────────────────────────────────────
@@ -47,5 +65,4 @@ SPONSORS = [
 ]
 
 # ─── کش تنظیمات ──────────────────────────────────────────────────────────────
-# برای کاهش تعداد کوئری‌ها، تنظیمات در حافظه کش می‌شوند
-CACHE_TTL = 60  # ثانیه
+CACHE_TTL = 60
