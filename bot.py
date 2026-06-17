@@ -8,7 +8,7 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.errors import FloodWaitError
-import db_supabase as db
+import database_supabase as db
 import db_cache as cache
 import config
 from texts import ENEMY_REPLIES, FRIEND_REPLIES
